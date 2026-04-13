@@ -1,0 +1,11 @@
+﻿[
+{
+    "externalJobId":  "bambu-gcode-23028-0",
+    "source":  "DESKTOP_AGENT",
+    "modelName":  "机械风格-皮卡丘V2",
+    "estimatedUsageGrams":  43,
+    "targetMaterial":  "PETG Basic",
+    "note":  "From Bambu Studio gcode .23028.0.gcode",
+    "createdAt":  1776047252596
+}
+]

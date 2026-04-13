@@ -1,0 +1,51 @@
+﻿{
+    "updatedAt":  1776070546047,
+    "inputMode":  "bambu-gcode",
+    "warnings":  [
+                     "Material conflict in \u0027C:\\Users\\Administrator\\Desktop\\.23028.0.gcode\u0027. Selected \u0027PETG Basic\u0027 from filament_settings_id."
+                 ],
+    "jobs":  [
+                 {
+                     "externalJobId":  "desktop-demo-benchy",
+                     "source":  "DESKTOP_AGENT",
+                     "modelName":  "Benchy Demo",
+                     "estimatedUsageGrams":  28,
+                     "targetMaterial":  "PLA Basic",
+                     "note":  "来自桌面同步器演示数据",
+                     "createdAt":  1775805900000,
+                     "signature":  "Benchy Demo|28|PLA Basic|来自桌面同步器演示数据|1775805900000",
+                     "status":  "CONFIRMED",
+                     "lastSeenAt":  1776054707909,
+                     "confirmedAt":  1775806800000,
+                     "targetRollId":  1
+                 },
+                 {
+                     "externalJobId":  "desktop-demo-gearbox",
+                     "source":  "DESKTOP_AGENT",
+                     "modelName":  "Gearbox Housing",
+                     "estimatedUsageGrams":  64,
+                     "targetMaterial":  "PETG Basic",
+                     "note":  "等待你选择目标卷后确认",
+                     "createdAt":  1775806500000,
+                     "signature":  "Gearbox Housing|64|PETG Basic|等待你选择目标卷后确认|1775806500000",
+                     "status":  "CONFIRMED",
+                     "lastSeenAt":  1775814807727,
+                     "confirmedAt":  1775807000000,
+                     "targetRollId":  1
+                 },
+                 {
+                     "externalJobId":  "bambu-gcode-23028-0",
+                     "source":  "DESKTOP_AGENT",
+                     "modelName":  "机械风格-皮卡丘V2",
+                     "estimatedUsageGrams":  43,
+                     "targetMaterial":  "PETG Basic",
+                     "note":  "From Bambu Studio gcode .23028.0.gcode",
+                     "createdAt":  1776047252596,
+                     "signature":  "机械风格-皮卡丘V2|43|PETG Basic|From Bambu Studio gcode .23028.0.gcode|1776047252596",
+                     "status":  "DRAFT",
+                     "lastSeenAt":  1776070546047,
+                     "confirmedAt":  null,
+                     "targetRollId":  null
+                 }
+             ]
+}

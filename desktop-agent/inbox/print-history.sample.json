@@ -1,0 +1,21 @@
+[
+  {
+    "externalJobId": "desktop-demo-benchy",
+    "source": "DESKTOP_AGENT",
+    "modelName": "Benchy Demo",
+    "estimatedUsageGrams": 28,
+    "targetMaterial": "PLA Basic",
+    "note": "来自桌面同步器演示数据",
+    "createdAt": 1775805900000
+  },
+  {
+    "externalJobId": "desktop-demo-gearbox",
+    "source": "DESKTOP_AGENT",
+    "modelName": "Gearbox Housing",
+    "estimatedUsageGrams": 64,
+    "targetMaterial": "PETG Basic",
+    "note": "等待你选择目标卷后确认",
+    "createdAt": 1775806500000
+  }
+]
+

@@ -1,0 +1,354 @@
+package com.tuozhu.consumablestatistics.ui
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.tuozhu.consumablestatistics.data.FilamentEventEntity
+import com.tuozhu.consumablestatistics.data.FilamentRepository
+import com.tuozhu.consumablestatistics.data.FilamentRollEntity
+import com.tuozhu.consumablestatistics.data.PrintJobEntity
+import com.tuozhu.consumablestatistics.data.PrintJobStatus
+import com.tuozhu.consumablestatistics.data.RollSnapshot
+import com.tuozhu.consumablestatistics.data.SyncConnectionStatus
+import com.tuozhu.consumablestatistics.data.SyncSourceType
+import com.tuozhu.consumablestatistics.data.SyncStateEntity
+import com.tuozhu.consumablestatistics.domain.SupportedMaterials
+import com.tuozhu.consumablestatistics.domain.WeightMath
+import com.tuozhu.consumablestatistics.sync.SyncSettings
+import com.tuozhu.consumablestatistics.sync.SyncSettingsStore
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+data class RollInput(
+    val brand: String,
+    val name: String,
+    val material: String,
+    val colorName: String,
+    val colorHex: String,
+    val initialWeightGrams: Int,
+    val remainingWeightGrams: Int,
+    val lowStockThresholdGrams: Int,
+    val notes: String,
+)
+
+data class RollUiModel(
+    val id: Long,
+    val brand: String,
+    val displayName: String,
+    val material: String,
+    val colorHex: String,
+    val initialWeightGrams: Int,
+    val estimatedRemainingGrams: Int,
+    val progress: Float,
+    val isLowStock: Boolean,
+    val isActive: Boolean,
+    val notes: String,
+    val calibrationLabel: String,
+)
+
+data class FilamentEventItem(
+    val id: Long,
+    val rollLabel: String,
+    val type: String,
+    val source: SyncSourceType,
+    val deltaGrams: Int,
+    val note: String,
+    val createdAt: Long,
+    val remainingAfterGrams: Int,
+)
+
+data class RecentEventUiModel(
+    val id: Long,
+    val title: String,
+    val note: String,
+    val timestampLabel: String,
+)
+
+data class SyncStatusUiModel(
+    val status: SyncConnectionStatus = SyncConnectionStatus.IDLE,
+    val source: SyncSourceType = SyncSourceType.MANUAL,
+    val lastSyncLabel: String = "尚未同步",
+    val message: String = "桌面自动同步尚未连接",
+    val pendingCount: Int = 0,
+    val desktopBaseUrl: String = "",
+    val isConfigured: Boolean = false,
+)
+
+data class PendingPrintJobUiModel(
+    val id: Long,
+    val modelName: String,
+    val sourceLabel: String,
+    val estimatedUsageGrams: Int,
+    val targetMaterial: String?,
+    val note: String,
+    val createdAtLabel: String,
+)
+
+data class ConsumableUiState(
+    val rolls: List<RollUiModel> = emptyList(),
+    val activeRoll: RollUiModel? = null,
+    val recentEvents: List<RecentEventUiModel> = emptyList(),
+    val syncStatus: SyncStatusUiModel = SyncStatusUiModel(),
+    val pendingPrintJobs: List<PendingPrintJobUiModel> = emptyList(),
+    val message: String? = null,
+)
+
+class ConsumableViewModel(
+    private val repository: FilamentRepository,
+    private val syncSettingsStore: SyncSettingsStore,
+) : ViewModel() {
+    private val messageState = MutableStateFlow<String?>(null)
+    private val rollsFlow = repository.observeRolls().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList(),
+    )
+    private val recentEventsFlow = repository.observeRecentEvents().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList(),
+    )
+    private val pendingJobsFlow = repository.observePendingPrintJobs().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList(),
+    )
+    private val syncStateFlow = repository.observeSyncState().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = null,
+    )
+    private val syncSettingsFlow = syncSettingsStore.observeSettings().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = syncSettingsStore.currentSettings(),
+    )
+
+    init {
+        if (syncSettingsStore.currentSettings().desktopBaseUrl.isNotBlank()) {
+            pullSync()
+        }
+    }
+
+    private val combinedDataFlow = combine(
+        rollsFlow,
+        recentEventsFlow,
+        pendingJobsFlow,
+        syncStateFlow,
+        syncSettingsFlow,
+    ) { rolls, recentEvents, pendingJobs, syncState, syncSettings ->
+        CombinedUiData(
+            rolls = rolls,
+            recentEvents = recentEvents,
+            pendingJobs = pendingJobs,
+            syncState = syncState,
+            syncSettings = syncSettings,
+        )
+    }
+
+    val uiState: StateFlow<ConsumableUiState> = combine(
+        combinedDataFlow,
+        messageState,
+    ) { data, message ->
+        val snapshots = data.rolls.map { roll ->
+            RollSnapshot(
+                roll = roll,
+                estimatedRemainingGrams = repository.calculateRemaining(roll),
+            )
+        }
+        val rollItems = snapshots.map(::toRollUiModel)
+        ConsumableUiState(
+            rolls = rollItems,
+            activeRoll = rollItems.firstOrNull { it.isActive },
+            recentEvents = mapRecentEvents(data.rolls, data.recentEvents).map(FilamentEventItem::toUiModel),
+            syncStatus = toSyncStatusUi(data.syncState, data.pendingJobs, data.syncSettings),
+            pendingPrintJobs = data.pendingJobs.map(PrintJobEntity::toUiModel),
+            message = message,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = ConsumableUiState(),
+    )
+
+    fun addRoll(input: RollInput) {
+        viewModelScope.launch {
+            repository.addRoll(
+                brand = input.brand.ifBlank { "拓竹 Bambu Lab" },
+                name = input.name.ifBlank { "未命名耗材" },
+                material = input.material.ifBlank { SupportedMaterials.default },
+                colorName = input.colorName.ifBlank { "未命名颜色" },
+                colorHex = input.colorHex,
+                initialWeightGrams = input.initialWeightGrams.coerceAtLeast(1),
+                remainingWeightGrams = input.remainingWeightGrams.coerceAtLeast(0),
+                lowStockThresholdGrams = input.lowStockThresholdGrams.coerceAtLeast(0),
+                notes = input.notes,
+            )
+            messageState.value = "耗材卷已保存"
+        }
+    }
+
+    fun consumeRoll(rollId: Long, grams: Int, note: String) {
+        viewModelScope.launch {
+            repository.consumeRoll(rollId, grams, note)
+            messageState.value = "耗材记录已更新"
+        }
+    }
+
+    fun recalibrateRoll(rollId: Long, newRemainingGrams: Int, note: String) {
+        viewModelScope.launch {
+            repository.recalibrateRoll(rollId, newRemainingGrams, note)
+            messageState.value = "余量已校准"
+        }
+    }
+
+    fun setActiveRoll(rollId: Long) {
+        viewModelScope.launch {
+            repository.setActiveRoll(rollId)
+            messageState.value = "已切换当前活动卷"
+        }
+    }
+
+    fun saveDesktopSyncAddress(baseUrl: String) {
+        syncSettingsStore.updateDesktopBaseUrl(baseUrl)
+        messageState.value = if (syncSettingsStore.currentSettings().desktopBaseUrl.isBlank()) {
+            "已清空桌面同步地址"
+        } else {
+            "桌面同步地址已保存"
+        }
+    }
+
+    fun pullSync() {
+        viewModelScope.launch {
+            val result = repository.pullSync()
+            messageState.value = result.message
+        }
+    }
+
+    fun confirmPrintJob(jobId: Long) {
+        viewModelScope.launch {
+            val result = repository.confirmPrintJob(jobId)
+            messageState.value = result.message
+        }
+    }
+
+    fun consumeMessage() {
+        messageState.value = null
+    }
+
+    private fun toRollUiModel(snapshot: RollSnapshot): RollUiModel {
+        val roll = snapshot.roll
+        return RollUiModel(
+            id = roll.id,
+            brand = roll.brand,
+            displayName = "${roll.colorName} ${roll.name}",
+            material = roll.material,
+            colorHex = roll.colorHex,
+            initialWeightGrams = roll.initialWeightGrams,
+            estimatedRemainingGrams = snapshot.estimatedRemainingGrams,
+            progress = WeightMath.progress(snapshot.estimatedRemainingGrams, roll.initialWeightGrams),
+            isLowStock = WeightMath.isLowStock(snapshot.estimatedRemainingGrams, roll.lowStockThresholdGrams),
+            isActive = roll.isActive,
+            notes = roll.notes,
+            calibrationLabel = "上次校准 ${formatTimestamp(roll.lastCalibrationAt)}",
+        )
+    }
+
+    private fun mapRecentEvents(
+        rolls: List<FilamentRollEntity>,
+        events: List<FilamentEventEntity>,
+    ): List<FilamentEventItem> {
+        val rollMap = rolls.associateBy { it.id }
+        return events.mapNotNull { event ->
+            val roll = rollMap[event.rollId] ?: return@mapNotNull null
+            FilamentEventItem(
+                id = event.id,
+                rollLabel = "${roll.colorName} ${roll.name}",
+                type = event.type.name,
+                source = event.source,
+                deltaGrams = event.deltaGrams,
+                note = event.note,
+                createdAt = event.createdAt,
+                remainingAfterGrams = event.remainingAfterGrams,
+            )
+        }
+    }
+
+    private fun toSyncStatusUi(
+        syncState: SyncStateEntity?,
+        pendingJobs: List<PrintJobEntity>,
+        syncSettings: SyncSettings,
+    ): SyncStatusUiModel {
+        return SyncStatusUiModel(
+            status = syncState?.status ?: SyncConnectionStatus.IDLE,
+            source = syncState?.lastSyncSource ?: SyncSourceType.MANUAL,
+            lastSyncLabel = formatRelativeTime(syncState?.lastSyncAt),
+            message = syncState?.lastMessage ?: "桌面自动同步尚未连接",
+            pendingCount = pendingJobs.count { it.status == PrintJobStatus.DRAFT },
+            desktopBaseUrl = syncSettings.desktopBaseUrl,
+            isConfigured = syncSettings.desktopBaseUrl.isNotBlank(),
+        )
+    }
+}
+
+private data class CombinedUiData(
+    val rolls: List<FilamentRollEntity>,
+    val recentEvents: List<FilamentEventEntity>,
+    val pendingJobs: List<PrintJobEntity>,
+    val syncState: SyncStateEntity?,
+    val syncSettings: SyncSettings,
+)
+
+class ConsumableViewModelFactory(
+    private val repository: FilamentRepository,
+    private val syncSettingsStore: SyncSettingsStore,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(ConsumableViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return ConsumableViewModel(repository, syncSettingsStore) as T
+        }
+        error("Unknown ViewModel class: ${modelClass.name}")
+    }
+}
+
+private fun PrintJobEntity.toUiModel(): PendingPrintJobUiModel {
+    return PendingPrintJobUiModel(
+        id = id,
+        modelName = modelName,
+        sourceLabel = source.toUiLabel(),
+        estimatedUsageGrams = estimatedUsageGrams,
+        targetMaterial = targetMaterial,
+        note = note,
+        createdAtLabel = formatTimestamp(createdAt),
+    )
+}
+
+private fun FilamentEventItem.toUiModel(): RecentEventUiModel {
+    val actionText = when (type) {
+        "CALIBRATION" -> "$rollLabel 校准到 ${remainingAfterGrams}g"
+        "PRINT_USAGE" -> "$rollLabel 自动同步消耗 ${-deltaGrams}g"
+        else -> "$rollLabel 手动登记 ${-deltaGrams}g"
+    }
+    val sourceLabel = when (source) {
+        SyncSourceType.MANUAL -> "手动"
+        SyncSourceType.DESKTOP_AGENT -> "桌面同步"
+        SyncSourceType.CLOUD -> "云同步"
+    }
+    return RecentEventUiModel(
+        id = id,
+        title = actionText,
+        note = "$sourceLabel | $note",
+        timestampLabel = formatTimestamp(createdAt),
+    )
+}
+
+private fun SyncSourceType.toUiLabel(): String = when (this) {
+    SyncSourceType.MANUAL -> "手动"
+    SyncSourceType.DESKTOP_AGENT -> "桌面同步"
+    SyncSourceType.CLOUD -> "云同步"
+}
