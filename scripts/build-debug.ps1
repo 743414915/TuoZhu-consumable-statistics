@@ -1,7 +1,10 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$jdkHome = Get-ChildItem (Join-Path $projectRoot ".tools\jdk") -Directory | Select-Object -First 1 -ExpandProperty FullName
+$jdkHome = Get-ChildItem (Join-Path $projectRoot ".tools\jdk") -Directory |
+    Where-Object { Test-Path (Join-Path $_.FullName "bin\java.exe") } |
+    Sort-Object Name |
+    Select-Object -First 1 -ExpandProperty FullName
 $gradleHome = Get-ChildItem (Join-Path $projectRoot ".tools\gradle") -Directory | Where-Object { $_.Name -like "gradle-*" } | Select-Object -First 1 -ExpandProperty FullName
 $sdkRoot = Join-Path $projectRoot ".tools\android-sdk"
 $androidUserHome = Join-Path $projectRoot ".tools\android-user-home"
@@ -35,4 +38,3 @@ try {
 } finally {
     Pop-Location
 }
-

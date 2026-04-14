@@ -1,8 +1,8 @@
 ﻿{
-    "updatedAt":  1776070546047,
-    "inputMode":  "bambu-gcode",
+    "updatedAt":  1776148059574,
+    "inputMode":  "sample-json",
     "warnings":  [
-                     "Material conflict in \u0027C:\\Users\\Administrator\\Desktop\\.23028.0.gcode\u0027. Selected \u0027PETG Basic\u0027 from filament_settings_id."
+
                  ],
     "jobs":  [
                  {

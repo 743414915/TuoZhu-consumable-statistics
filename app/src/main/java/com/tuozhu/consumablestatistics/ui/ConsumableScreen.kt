@@ -1,6 +1,15 @@
 package com.tuozhu.consumablestatistics.ui
 
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color.parseColor
+import android.net.Uri
+import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -23,11 +32,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Lan
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Scale
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
@@ -41,6 +55,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -56,6 +71,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,10 +80,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tuozhu.consumablestatistics.data.SyncConnectionStatus
 import com.tuozhu.consumablestatistics.data.SyncSourceType
 import com.tuozhu.consumablestatistics.domain.SupportedMaterials
+import com.tuozhu.consumablestatistics.sync.DesktopEndpointKind
+import com.tuozhu.consumablestatistics.sync.connectionScopeHint
+import com.tuozhu.consumablestatistics.sync.connectionScopeLabel
+import com.tuozhu.consumablestatistics.sync.normalizeDesktopBaseUrl
 import com.tuozhu.consumablestatistics.ui.theme.BurntOrange
 import com.tuozhu.consumablestatistics.ui.theme.ClayOrange
 import com.tuozhu.consumablestatistics.ui.theme.ForestSlate
@@ -75,7 +96,19 @@ import com.tuozhu.consumablestatistics.ui.theme.IvoryMist
 import com.tuozhu.consumablestatistics.ui.theme.MossInk
 import com.tuozhu.consumablestatistics.ui.theme.SignalRed
 import com.tuozhu.consumablestatistics.ui.theme.SuccessMint
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import kotlin.math.roundToInt
+
+private enum class ConsumableRootPage(
+    val title: String,
+    val subtitle: String,
+) {
+    OVERVIEW("总览", "今天先看活动卷、库存风险和待处理同步"),
+    INVENTORY("卷库", "集中管理活动卷和其他耗材卷"),
+    SYNC("同步", "处理桌面同步、扫码配对和待确认打印"),
+    HISTORY("记录", "查看打印历史和最近事件"),
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,6 +118,7 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
     var addDialogVisible by rememberSaveable { mutableStateOf(false) }
     var consumeRollId by rememberSaveable { mutableLongStateOf(-1L) }
     var adjustRollId by rememberSaveable { mutableLongStateOf(-1L) }
+    var deleteRollId by rememberSaveable { mutableLongStateOf(-1L) }
     var shelfExpandedOverride by rememberSaveable { mutableStateOf<Boolean?>(null) }
 
     val shelfRolls = if (state.activeRoll == null) state.rolls else state.rolls.filterNot { it.id == state.activeRoll?.id }
@@ -152,6 +186,8 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
                         syncStatus = state.syncStatus,
                         onSaveEndpoint = viewModel::saveDesktopSyncAddress,
                         onPullSync = viewModel::pullSync,
+                        onDiscoverLan = viewModel::autoDiscoverLanDesktop,
+                        onScanPairing = viewModel::pairWithScannedDesktopAddress,
                     )
                 }
                 if (state.pendingPrintJobs.isNotEmpty()) {
@@ -163,12 +199,18 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
                         )
                     }
                 }
+                if (state.printHistory.isNotEmpty()) {
+                    item {
+                        PrintHistorySection(history = state.printHistory)
+                    }
+                }
                 state.activeRoll?.let { activeRoll ->
                     item {
                         ActiveRollSection(
                             roll = activeRoll,
                             onConsumeClick = { consumeRollId = activeRoll.id },
                             onAdjustClick = { adjustRollId = activeRoll.id },
+                            onDeleteClick = { deleteRollId = activeRoll.id },
                         )
                     }
                 }
@@ -188,6 +230,7 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
                             allowCollapse = allowShelfCollapse,
                             onConsumeClick = { consumeRollId = it },
                             onAdjustClick = { adjustRollId = it },
+                            onDeleteClick = { deleteRollId = it },
                             onSetActiveClick = viewModel::setActiveRoll,
                         )
                     }
@@ -240,6 +283,548 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
                 adjustRollId = -1L
             },
         )
+    }
+
+    val deleteRoll = state.rolls.firstOrNull { it.id == deleteRollId }
+    if (deleteRoll != null) {
+        DeleteRollDialog(
+            rollName = deleteRoll.displayName,
+            isActive = deleteRoll.isActive,
+            onDismiss = { deleteRollId = -1L },
+            onConfirm = {
+                viewModel.deleteRoll(deleteRoll.id)
+                deleteRollId = -1L
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var addDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var consumeRollId by rememberSaveable { mutableLongStateOf(-1L) }
+    var adjustRollId by rememberSaveable { mutableLongStateOf(-1L) }
+    var deleteRollId by rememberSaveable { mutableLongStateOf(-1L) }
+    var shelfExpandedOverride by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    var currentPage by rememberSaveable { mutableStateOf(ConsumableRootPage.OVERVIEW) }
+
+    val shelfRolls = if (state.activeRoll == null) state.rolls else state.rolls.filterNot { it.id == state.activeRoll?.id }
+    val allowShelfCollapse = shelfRolls.size > 2
+    val shelfExpanded = if (allowShelfCollapse) shelfExpandedOverride ?: false else true
+    val showAddFab = currentPage == ConsumableRootPage.OVERVIEW || currentPage == ConsumableRootPage.INVENTORY
+
+    LaunchedEffect(state.message) {
+        val message = state.message ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(message)
+        viewModel.consumeMessage()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(IvoryMist, Color(0xFFFFFBF6), Color(0xFFF3E4D6)),
+                ),
+            ),
+    ) {
+        Scaffold(
+            containerColor = Color.Transparent,
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(currentPage.title, style = MaterialTheme.typography.headlineMedium)
+                            Text(
+                                text = currentPage.subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                )
+            },
+            floatingActionButton = {
+                if (showAddFab) {
+                    FloatingActionButton(
+                        onClick = { addDialogVisible = true },
+                        containerColor = ClayOrange,
+                        contentColor = Color.White,
+                    ) {
+                        Icon(Icons.Outlined.Add, contentDescription = "新增耗材卷")
+                    }
+                }
+            },
+            bottomBar = {
+                BottomTabBar(
+                    currentPage = currentPage,
+                    onSelectPage = { currentPage = it },
+                )
+            },
+        ) { innerPadding ->
+            when (currentPage) {
+                ConsumableRootPage.OVERVIEW -> OverviewPage(
+                    state = state,
+                    modifier = Modifier.padding(innerPadding),
+                    onOpenSync = { currentPage = ConsumableRootPage.SYNC },
+                    onOpenHistory = { currentPage = ConsumableRootPage.HISTORY },
+                    onConsumeClick = { consumeRollId = it },
+                    onAdjustClick = { adjustRollId = it },
+                    onDeleteClick = { deleteRollId = it },
+                )
+                ConsumableRootPage.INVENTORY -> InventoryPage(
+                    state = state,
+                    shelfRolls = shelfRolls,
+                    shelfExpanded = shelfExpanded,
+                    allowShelfCollapse = allowShelfCollapse,
+                    modifier = Modifier.padding(innerPadding),
+                    onToggleShelfExpanded = {
+                        if (allowShelfCollapse) {
+                            shelfExpandedOverride = !shelfExpanded
+                        }
+                    },
+                    onConsumeClick = { consumeRollId = it },
+                    onAdjustClick = { adjustRollId = it },
+                    onDeleteClick = { deleteRollId = it },
+                    onSetActiveClick = viewModel::setActiveRoll,
+                )
+                ConsumableRootPage.SYNC -> SyncPage(
+                    state = state,
+                    modifier = Modifier.padding(innerPadding),
+                    onSaveEndpoint = viewModel::saveDesktopSyncAddress,
+                    onPullSync = viewModel::pullSync,
+                    onDiscoverLan = viewModel::autoDiscoverLanDesktop,
+                    onScanPairing = viewModel::pairWithScannedDesktopAddress,
+                    onConfirmJob = viewModel::confirmPrintJob,
+                )
+                ConsumableRootPage.HISTORY -> HistoryPage(
+                    state = state,
+                    modifier = Modifier.padding(innerPadding),
+                )
+            }
+        }
+    }
+
+    if (addDialogVisible) {
+        AddRollDialog(
+            onDismiss = { addDialogVisible = false },
+            onConfirm = { input ->
+                viewModel.addRoll(input)
+                addDialogVisible = false
+            },
+        )
+    }
+
+    val consumeRoll = state.rolls.firstOrNull { it.id == consumeRollId }
+    if (consumeRoll != null) {
+        WeightChangeDialog(
+            title = "记录耗材",
+            confirmLabel = "保存",
+            description = "记录本次打印大约消耗的克重，用于维持库存估算。",
+            rollName = consumeRoll.displayName,
+            initialValue = "",
+            onDismiss = { consumeRollId = -1L },
+            onConfirm = { grams, note ->
+                viewModel.consumeRoll(consumeRoll.id, grams, note)
+                consumeRollId = -1L
+            },
+        )
+    }
+
+    val adjustRoll = state.rolls.firstOrNull { it.id == adjustRollId }
+    if (adjustRoll != null) {
+        WeightChangeDialog(
+            title = "校准余量",
+            confirmLabel = "校准",
+            description = "输入你刚刚实际称到的剩余克重，系统会把它作为新的基准值。",
+            rollName = adjustRoll.displayName,
+            initialValue = adjustRoll.estimatedRemainingGrams.toString(),
+            allowZero = true,
+            onDismiss = { adjustRollId = -1L },
+            onConfirm = { grams, note ->
+                viewModel.recalibrateRoll(adjustRoll.id, grams, note)
+                adjustRollId = -1L
+            },
+        )
+    }
+
+    val deleteRoll = state.rolls.firstOrNull { it.id == deleteRollId }
+    if (deleteRoll != null) {
+        DeleteRollDialog(
+            rollName = deleteRoll.displayName,
+            isActive = deleteRoll.isActive,
+            onDismiss = { deleteRollId = -1L },
+            onConfirm = {
+                viewModel.deleteRoll(deleteRoll.id)
+                deleteRollId = -1L
+            },
+        )
+    }
+}
+
+@Composable
+private fun BottomTabBar(
+    currentPage: ConsumableRootPage,
+    onSelectPage: (ConsumableRootPage) -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        tonalElevation = 8.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            BottomTabButton(
+                modifier = Modifier.weight(1f),
+                selected = currentPage == ConsumableRootPage.OVERVIEW,
+                label = ConsumableRootPage.OVERVIEW.title,
+                icon = { Icon(Icons.Outlined.Home, contentDescription = null) },
+                onClick = { onSelectPage(ConsumableRootPage.OVERVIEW) },
+            )
+            BottomTabButton(
+                modifier = Modifier.weight(1f),
+                selected = currentPage == ConsumableRootPage.INVENTORY,
+                label = ConsumableRootPage.INVENTORY.title,
+                icon = { Icon(Icons.Outlined.Inventory2, contentDescription = null) },
+                onClick = { onSelectPage(ConsumableRootPage.INVENTORY) },
+            )
+            BottomTabButton(
+                modifier = Modifier.weight(1f),
+                selected = currentPage == ConsumableRootPage.SYNC,
+                label = ConsumableRootPage.SYNC.title,
+                icon = { Icon(Icons.Outlined.Sync, contentDescription = null) },
+                onClick = { onSelectPage(ConsumableRootPage.SYNC) },
+            )
+            BottomTabButton(
+                modifier = Modifier.weight(1f),
+                selected = currentPage == ConsumableRootPage.HISTORY,
+                label = ConsumableRootPage.HISTORY.title,
+                icon = { Icon(Icons.Outlined.History, contentDescription = null) },
+                onClick = { onSelectPage(ConsumableRootPage.HISTORY) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun BottomTabButton(
+    modifier: Modifier = Modifier,
+    selected: Boolean,
+    label: String,
+    icon: @Composable () -> Unit,
+    onClick: () -> Unit,
+) {
+    TextButton(
+        modifier = modifier,
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        colors = ButtonDefaults.textButtonColors(
+            containerColor = if (selected) ClayOrange.copy(alpha = 0.14f) else Color.Transparent,
+            contentColor = if (selected) ClayOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            icon()
+            Text(label, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun ConsumableNavItem(
+    currentPage: ConsumableRootPage,
+    targetPage: ConsumableRootPage,
+    icon: @Composable () -> Unit,
+    onClick: () -> Unit,
+) {
+    BottomTabButton(
+        selected = currentPage == targetPage,
+        label = targetPage.title,
+        onClick = onClick,
+        icon = icon,
+    )
+}
+
+@Composable
+private fun PageColumn(
+    modifier: Modifier = Modifier,
+    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = WindowInsets.navigationBars.asPaddingValues(),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        content = content,
+    )
+}
+
+@Composable
+private fun OverviewPage(
+    state: ConsumableUiState,
+    modifier: Modifier = Modifier,
+    onOpenSync: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onConsumeClick: (Long) -> Unit,
+    onAdjustClick: (Long) -> Unit,
+    onDeleteClick: (Long) -> Unit,
+) {
+    PageColumn(modifier = modifier) {
+        item {
+            HeroSection(
+                totalRolls = state.rolls.size,
+                totalRemaining = state.rolls.sumOf { it.estimatedRemainingGrams },
+                lowStockCount = state.rolls.count { it.isLowStock },
+            )
+        }
+        item {
+            OverviewNavigatorCard(
+                state = state,
+                onOpenSync = onOpenSync,
+                onOpenHistory = onOpenHistory,
+            )
+        }
+        state.activeRoll?.let { activeRoll ->
+            item {
+                ActiveRollSection(
+                    roll = activeRoll,
+                    onConsumeClick = { onConsumeClick(activeRoll.id) },
+                    onAdjustClick = { onAdjustClick(activeRoll.id) },
+                    onDeleteClick = { onDeleteClick(activeRoll.id) },
+                )
+            }
+        }
+        if (state.activeRoll == null) {
+            item { EmptyStateCard() }
+        }
+    }
+}
+
+@Composable
+private fun InventoryPage(
+    state: ConsumableUiState,
+    shelfRolls: List<RollUiModel>,
+    shelfExpanded: Boolean,
+    allowShelfCollapse: Boolean,
+    modifier: Modifier = Modifier,
+    onToggleShelfExpanded: () -> Unit,
+    onConsumeClick: (Long) -> Unit,
+    onAdjustClick: (Long) -> Unit,
+    onDeleteClick: (Long) -> Unit,
+    onSetActiveClick: (Long) -> Unit,
+) {
+    PageColumn(modifier = modifier) {
+        state.activeRoll?.let { activeRoll ->
+            item {
+                ActiveRollSection(
+                    roll = activeRoll,
+                    onConsumeClick = { onConsumeClick(activeRoll.id) },
+                    onAdjustClick = { onAdjustClick(activeRoll.id) },
+                    onDeleteClick = { onDeleteClick(activeRoll.id) },
+                )
+            }
+        }
+        if (state.rolls.isEmpty()) {
+            item { EmptyStateCard() }
+        } else if (shelfRolls.isNotEmpty()) {
+            item {
+                InventoryShelfSection(
+                    title = if (state.activeRoll == null) "全部耗材卷" else "其余耗材卷",
+                    rolls = shelfRolls,
+                    expanded = shelfExpanded,
+                    onToggleExpanded = onToggleShelfExpanded,
+                    allowCollapse = allowShelfCollapse,
+                    onConsumeClick = onConsumeClick,
+                    onAdjustClick = onAdjustClick,
+                    onDeleteClick = onDeleteClick,
+                    onSetActiveClick = onSetActiveClick,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SyncPage(
+    state: ConsumableUiState,
+    modifier: Modifier = Modifier,
+    onSaveEndpoint: (String) -> Unit,
+    onPullSync: () -> Unit,
+    onDiscoverLan: () -> Unit,
+    onScanPairing: (String?) -> Unit,
+    onConfirmJob: (Long) -> Unit,
+) {
+    PageColumn(modifier = modifier) {
+        item {
+            SyncStatusSection(
+                syncStatus = state.syncStatus,
+                onSaveEndpoint = onSaveEndpoint,
+                onPullSync = onPullSync,
+                onDiscoverLan = onDiscoverLan,
+                onScanPairing = onScanPairing,
+            )
+        }
+        if (state.pendingPrintJobs.isNotEmpty()) {
+            item {
+                PendingPrintJobsSection(
+                    jobs = state.pendingPrintJobs,
+                    activeRoll = state.activeRoll,
+                    onConfirmJob = onConfirmJob,
+                )
+            }
+        } else {
+            item { SyncEmptyCard() }
+        }
+    }
+}
+
+@Composable
+private fun HistoryPage(
+    state: ConsumableUiState,
+    modifier: Modifier = Modifier,
+) {
+    PageColumn(modifier = modifier) {
+        if (state.printHistory.isNotEmpty()) {
+            item { PrintHistorySection(history = state.printHistory, expandedInitially = true) }
+        }
+        if (state.recentEvents.isNotEmpty()) {
+            item { RecentEventSection(events = state.recentEvents) }
+        } else if (state.printHistory.isEmpty()) {
+            item { HistoryEmptyCard() }
+        }
+    }
+}
+
+@Composable
+private fun OverviewNavigatorCard(
+    state: ConsumableUiState,
+    onOpenSync: () -> Unit,
+    onOpenHistory: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("快速入口", style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = "把高频操作分流到不同页面后，这里只保留最值得先看的状态。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OverviewShortcut(
+                    modifier = Modifier.weight(1f),
+                    icon = { Icon(Icons.Outlined.Sync, contentDescription = null, tint = ClayOrange) },
+                    title = "待确认打印",
+                    value = "${state.pendingPrintJobs.size} 条",
+                    hint = if (state.pendingPrintJobs.isEmpty()) "当前没有待处理草稿" else "去同步页确认打印任务",
+                    onClick = onOpenSync,
+                )
+                OverviewShortcut(
+                    modifier = Modifier.weight(1f),
+                    icon = { Icon(Icons.Outlined.History, contentDescription = null, tint = MossInk) },
+                    title = "最近记录",
+                    value = "${state.printHistory.size + state.recentEvents.size} 条",
+                    hint = "去记录页查看历史和事件",
+                    onClick = onOpenHistory,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverviewShortcut(
+    modifier: Modifier = Modifier,
+    icon: @Composable () -> Unit,
+    title: String,
+    value: String,
+    hint: String,
+    onClick: () -> Unit,
+) {
+    OutlinedButton(
+        modifier = modifier,
+        onClick = onClick,
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            icon()
+            Text(title, style = MaterialTheme.typography.labelLarge)
+            Text(value, style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SyncEmptyCard() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("当前没有待确认打印任务", style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = "同步页现在只保留桌面连接和打印确认相关操作。若桌面端已切片完成，点击“立即拉取”即可刷新。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryEmptyCard() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("还没有历史记录", style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = "等你确认第一条打印任务，或手动记录一次耗材变动后，这里会开始沉淀打印历史和最近事件。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -298,9 +883,39 @@ private fun SyncStatusSection(
     syncStatus: SyncStatusUiModel,
     onSaveEndpoint: (String) -> Unit,
     onPullSync: () -> Unit,
+    onDiscoverLan: () -> Unit,
+    onScanPairing: (String?) -> Unit,
 ) {
+    val context = LocalContext.current
+    val activity = context as? Activity
     var settingsExpanded by rememberSaveable { mutableStateOf(!syncStatus.isConfigured) }
     var endpointInput by rememberSaveable { mutableStateOf(syncStatus.desktopBaseUrl) }
+    val normalizedInput = normalizeDesktopBaseUrl(endpointInput)
+    val hasPendingChanges = normalizedInput != syncStatus.desktopBaseUrl
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val rawValue = result.contents
+        if (rawValue.isNullOrBlank()) {
+            Toast.makeText(context, "已取消扫码", Toast.LENGTH_SHORT).show()
+        } else {
+            onScanPairing(rawValue)
+        }
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            scanLauncher.launch(buildQrScanOptions())
+        } else {
+            val permanentlyDenied = activity != null &&
+                !activity.shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)
+            if (permanentlyDenied) {
+                Toast.makeText(context, "相机权限已被禁止，请在系统设置中开启后再扫码", Toast.LENGTH_LONG).show()
+                openAppSettings(context)
+            } else {
+                Toast.makeText(context, "未授予相机权限，请改用手动填写地址", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     LaunchedEffect(syncStatus.desktopBaseUrl) {
         endpointInput = syncStatus.desktopBaseUrl
@@ -331,7 +946,7 @@ private fun SyncStatusSection(
                 ) {
                     Text("桌面同步", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        text = "${syncStatus.source.toUiLabel()} | ${syncStatus.lastSyncLabel}",
+                        text = "来源 ${syncStatus.source.toUiLabel()} · ${syncStatus.lastSyncLabel}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -370,25 +985,82 @@ private fun SyncStatusSection(
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    Text(
+                        text = "当前已绑定的桌面地址",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Lan,
+                            imageVector = Icons.Outlined.Computer,
                             contentDescription = null,
                             tint = ClayOrange,
                             modifier = Modifier.size(18.dp),
                         )
                         Text(
-                            text = if (syncStatus.isConfigured) syncStatus.desktopBaseUrl else "尚未设置桌面地址",
+                            text = if (syncStatus.isConfigured) syncStatus.desktopBaseUrl else "正在检测或尚未设置桌面同步地址",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        StatusPill(
+                            text = "地址类型 ${syncStatus.addressKindLabel}",
+                            containerColor = when (syncStatus.addressKind) {
+                                DesktopEndpointKind.TAILSCALE,
+                                DesktopEndpointKind.MAGIC_DNS -> ClayOrange.copy(alpha = 0.12f)
+                                DesktopEndpointKind.LAN -> MaterialTheme.colorScheme.secondaryContainer
+                                DesktopEndpointKind.CUSTOM -> MaterialTheme.colorScheme.tertiaryContainer
+                                DesktopEndpointKind.NONE -> MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            contentColor = when (syncStatus.addressKind) {
+                                DesktopEndpointKind.TAILSCALE,
+                                DesktopEndpointKind.MAGIC_DNS -> ClayOrange
+                                DesktopEndpointKind.LAN -> MaterialTheme.colorScheme.onSecondaryContainer
+                                DesktopEndpointKind.CUSTOM -> MaterialTheme.colorScheme.onTertiaryContainer
+                                DesktopEndpointKind.NONE -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = when (syncStatus.addressKind) {
+                                        DesktopEndpointKind.TAILSCALE,
+                                        DesktopEndpointKind.MAGIC_DNS -> Icons.Outlined.Public
+                                        DesktopEndpointKind.LAN -> Icons.Outlined.Lan
+                                        else -> Icons.Outlined.Computer
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            },
+                        )
+                        StatusPill(
+                            text = syncStatus.addressKind.connectionScopeLabel(),
+                            containerColor = if (
+                                syncStatus.addressKind == DesktopEndpointKind.TAILSCALE ||
+                                syncStatus.addressKind == DesktopEndpointKind.MAGIC_DNS
+                            ) {
+                                SuccessMint.copy(alpha = 0.14f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            contentColor = if (
+                                syncStatus.addressKind == DesktopEndpointKind.TAILSCALE ||
+                                syncStatus.addressKind == DesktopEndpointKind.MAGIC_DNS
+                            ) {
+                                MossInk
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
                     Text(
-                        text = "确保手机和电脑处于同一 Wi-Fi，并且电脑端已运行 desktop-agent/start-sync-server.ps1。",
+                        text = syncStatus.addressKind.connectionScopeHint(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -399,33 +1071,98 @@ private fun SyncStatusSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
+                StatusPill(
                     text = "待确认打印任务 ${syncStatus.pendingCount} 条",
-                    style = MaterialTheme.typography.bodyMedium,
+                    containerColor = if (syncStatus.pendingCount > 0) ClayOrange.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = if (syncStatus.pendingCount > 0) ClayOrange else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 TextButton(onClick = { settingsExpanded = !settingsExpanded }) {
-                    Text(if (settingsExpanded) "收起设置" else "设置桌面地址")
+                    Text(if (settingsExpanded) "收起设置" else if (syncStatus.isConfigured) "编辑地址" else "填写地址")
                 }
             }
             AnimatedVisibility(visible = settingsExpanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "支持直接输入 Tailscale IP、MagicDNS 域名，或局域网 IP。未填写协议时会自动补成 http://",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     OutlinedTextField(
                         value = endpointInput,
                         onValueChange = { endpointInput = it },
                         label = { Text("桌面同步地址") },
-                        placeholder = { Text("例如 192.168.1.8:8823 或 http://192.168.1.8:8823") },
+                        placeholder = { Text("例如 100.x.x.x:8823、电脑名.tailnet.ts.net:8823 或 192.168.x.x:8823") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (hasPendingChanges) {
+                        Text(
+                            text = "地址有未保存改动",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ClayOrange,
+                        )
+                    }
+                    if (syncStatus.isDiscoveringLan) {
+                        Text(
+                            text = "正在扫描同一 Wi‑Fi 下的桌面同步服务，通常需要几秒钟。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ClayOrange,
+                        )
+                    } else {
+                        Text(
+                            text = "“扫描同一 Wi‑Fi”只用于局域网备用地址；如果你已经接入 Tailscale，请优先使用桌面端主推荐地址或二维码配对。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         Button(
+                            modifier = Modifier.weight(1f),
                             onClick = { onSaveEndpoint(endpointInput) },
                             colors = ButtonDefaults.buttonColors(containerColor = ClayOrange, contentColor = Color.White),
                         ) {
-                            Text("保存地址")
+                            Text(if (normalizedInput.isBlank()) "清空地址" else "保存地址")
                         }
-                        TextButton(onClick = onPullSync) {
-                            Text("立即拉取")
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onPullSync,
+                        ) {
+                            Text("拉取桌面打印记录")
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                if (activity == null) {
+                                    Toast.makeText(context, "当前页面无法启动扫码器", Toast.LENGTH_SHORT).show()
+                                    return@OutlinedButton
+                                }
+                                val permissionGranted = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.CAMERA,
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (permissionGranted) {
+                                    scanLauncher.launch(buildQrScanOptions())
+                                } else {
+                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("扫码配对")
+                        }
+                        OutlinedButton(
+                            onClick = onDiscoverLan,
+                            enabled = !syncStatus.isDiscoveringLan,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(if (syncStatus.isDiscoveringLan) "扫描同一 Wi‑Fi..." else "扫描同一 Wi‑Fi")
                         }
                     }
                 }
@@ -557,6 +1294,7 @@ private fun ActiveRollSection(
     roll: RollUiModel,
     onConsumeClick: () -> Unit,
     onAdjustClick: () -> Unit,
+    onDeleteClick: () -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -608,8 +1346,12 @@ private fun ActiveRollSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Button(
+                    modifier = Modifier.weight(1f),
                     onClick = onConsumeClick,
                     colors = ButtonDefaults.buttonColors(containerColor = ClayOrange, contentColor = Color.White),
                 ) {
@@ -617,11 +1359,28 @@ private fun ActiveRollSection(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("记录消耗")
                 }
-                TextButton(onClick = onAdjustClick) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = onAdjustClick,
+                ) {
                     Icon(Icons.Outlined.Scale, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("称重校准")
                 }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onDeleteClick,
+                border = BorderStroke(1.dp, SignalRed.copy(alpha = 0.4f)),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = SignalRed.copy(alpha = 0.05f),
+                    contentColor = SignalRed,
+                ),
+            ) {
+                Icon(Icons.Outlined.Delete, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("删除当前活动卷")
             }
         }
     }
@@ -665,6 +1424,7 @@ private fun InventoryShelfSection(
     allowCollapse: Boolean,
     onConsumeClick: (Long) -> Unit,
     onAdjustClick: (Long) -> Unit,
+    onDeleteClick: (Long) -> Unit,
     onSetActiveClick: (Long) -> Unit,
 ) {
     Card(
@@ -716,6 +1476,7 @@ private fun InventoryShelfSection(
                             cardPadding = 0.dp,
                             onConsumeClick = { onConsumeClick(roll.id) },
                             onAdjustClick = { onAdjustClick(roll.id) },
+                            onDeleteClick = { onDeleteClick(roll.id) },
                             onSetActiveClick = { onSetActiveClick(roll.id) },
                         )
                     }
@@ -731,6 +1492,7 @@ private fun RollCard(
     cardPadding: androidx.compose.ui.unit.Dp = 16.dp,
     onConsumeClick: () -> Unit,
     onAdjustClick: () -> Unit,
+    onDeleteClick: () -> Unit,
     onSetActiveClick: () -> Unit,
 ) {
     val accent = if (roll.isLowStock) SignalRed else colorFromHex(roll.colorHex)
@@ -862,24 +1624,57 @@ private fun RollCard(
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = onConsumeClick,
-                        colors = ButtonDefaults.buttonColors(containerColor = ClayOrange, contentColor = Color.White),
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Icon(Icons.Outlined.Inventory2, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("记录消耗")
-                    }
-                    TextButton(onClick = onAdjustClick) {
-                        Icon(Icons.Outlined.Scale, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("校准余量")
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onConsumeClick,
+                            colors = ButtonDefaults.buttonColors(containerColor = ClayOrange, contentColor = Color.White),
+                        ) {
+                            Icon(Icons.Outlined.Inventory2, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("记录消耗")
+                        }
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onAdjustClick,
+                            border = BorderStroke(1.dp, accent.copy(alpha = 0.45f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = accent),
+                        ) {
+                            Icon(Icons.Outlined.Scale, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("校准余量")
+                        }
                     }
                     if (!roll.isActive) {
-                        TextButton(onClick = onSetActiveClick) {
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = onSetActiveClick,
+                            border = BorderStroke(1.dp, ClayOrange.copy(alpha = 0.55f)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = ClayOrange.copy(alpha = 0.08f),
+                                contentColor = ClayOrange,
+                            ),
+                        ) {
                             Text("设为活动卷")
                         }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = onDeleteClick,
+                        border = BorderStroke(1.dp, SignalRed.copy(alpha = 0.4f)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = SignalRed.copy(alpha = 0.05f),
+                            contentColor = SignalRed,
+                        ),
+                    ) {
+                        Icon(Icons.Outlined.Delete, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (roll.isActive) "删除当前活动卷" else "删除此卷")
                     }
                 }
             }
@@ -902,6 +1697,102 @@ private fun StatusPill(
         ) {
             icon?.invoke()
             Text(text = text, style = MaterialTheme.typography.labelLarge, color = contentColor)
+        }
+    }
+}
+
+private fun buildQrScanOptions(): ScanOptions {
+    return ScanOptions().apply {
+        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+        setPrompt("请扫描桌面端配对二维码")
+        setBeepEnabled(false)
+        setOrientationLocked(true)
+    }
+}
+
+private fun openAppSettings(context: android.content.Context) {
+    val intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", context.packageName, null),
+    ).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
+}
+
+@Composable
+private fun PrintHistorySection(
+    history: List<PrintHistoryJobUiModel>,
+    expandedInitially: Boolean = false,
+) {
+    var expanded by rememberSaveable { mutableStateOf(expandedInitially) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.History, contentDescription = null, tint = ClayOrange)
+                    Column {
+                        Text("打印历史", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            text = "最近 ${history.size} 条已确认打印",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "收起" else "查看")
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    history.forEachIndexed { index, job ->
+                        if (index > 0) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(job.modelName, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = "${job.confirmedAtLabel} | ${job.sourceLabel} | ${job.estimatedUsageGrams}g",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            job.targetMaterial?.takeIf { it.isNotBlank() }?.let { material ->
+                                Text(
+                                    text = "材料：$material",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (job.note.isNotBlank()) {
+                                Text(
+                                    text = job.note,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -939,7 +1830,7 @@ private fun RecentEventSection(events: List<RecentEventUiModel>) {
 }
 
 private fun SyncConnectionStatus.toUiLabel(): String = when (this) {
-    SyncConnectionStatus.IDLE -> "待接入"
+    SyncConnectionStatus.IDLE -> "待连接"
     SyncConnectionStatus.SUCCESS -> "已同步"
     SyncConnectionStatus.OFFLINE -> "离线"
     SyncConnectionStatus.ERROR -> "失败"

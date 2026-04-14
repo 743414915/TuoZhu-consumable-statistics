@@ -102,7 +102,7 @@ class DesktopAgentSyncCoordinatorTest {
 
         assertEquals(SyncConnectionStatus.OFFLINE, result.status)
         assertTrue(result.message.contains("127.0.0.1"))
-        assertTrue(result.message.contains("Wi-Fi"))
+        assertTrue(result.message.contains("Tailscale"))
     }
 }
 

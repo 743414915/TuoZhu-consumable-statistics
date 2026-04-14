@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$InboxPath = "",
     [string]$OutboxPath = "",
     [string]$StatePath = "",
@@ -339,8 +339,7 @@ function Convert-BambuGcodeToJob {
     )
 
     $item = Get-Item -LiteralPath $Path -Force
-    $lines = Get-Content -LiteralPath $Path -Encoding UTF8 -TotalCount 2000
-    $text = ($lines -join "`n")
+    $text = Get-Content -LiteralPath $Path -Encoding UTF8 -Raw
     if ($text -notmatch '(?m)^;\s*BambuStudio\b') {
         throw "File '$Path' is not recognized as a Bambu Studio gcode."
     }

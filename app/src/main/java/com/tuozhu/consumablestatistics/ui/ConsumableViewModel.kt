@@ -14,8 +14,13 @@ import com.tuozhu.consumablestatistics.data.SyncSourceType
 import com.tuozhu.consumablestatistics.data.SyncStateEntity
 import com.tuozhu.consumablestatistics.domain.SupportedMaterials
 import com.tuozhu.consumablestatistics.domain.WeightMath
+import com.tuozhu.consumablestatistics.sync.DesktopEndpointKind
+import com.tuozhu.consumablestatistics.sync.DesktopLanDiscoveryResult
+import com.tuozhu.consumablestatistics.sync.DesktopLanEndpointDiscovery
 import com.tuozhu.consumablestatistics.sync.SyncSettings
 import com.tuozhu.consumablestatistics.sync.SyncSettingsStore
+import com.tuozhu.consumablestatistics.sync.classifyDesktopBaseUrl
+import com.tuozhu.consumablestatistics.sync.normalizeScannedDesktopBaseUrl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -76,6 +81,9 @@ data class SyncStatusUiModel(
     val pendingCount: Int = 0,
     val desktopBaseUrl: String = "",
     val isConfigured: Boolean = false,
+    val addressKind: DesktopEndpointKind = DesktopEndpointKind.NONE,
+    val addressKindLabel: String = "未设置",
+    val isDiscoveringLan: Boolean = false,
 )
 
 data class PendingPrintJobUiModel(
@@ -88,20 +96,34 @@ data class PendingPrintJobUiModel(
     val createdAtLabel: String,
 )
 
+data class PrintHistoryJobUiModel(
+    val id: Long,
+    val modelName: String,
+    val sourceLabel: String,
+    val estimatedUsageGrams: Int,
+    val targetMaterial: String?,
+    val note: String,
+    val createdAtLabel: String,
+    val confirmedAtLabel: String,
+)
+
 data class ConsumableUiState(
     val rolls: List<RollUiModel> = emptyList(),
     val activeRoll: RollUiModel? = null,
     val recentEvents: List<RecentEventUiModel> = emptyList(),
     val syncStatus: SyncStatusUiModel = SyncStatusUiModel(),
     val pendingPrintJobs: List<PendingPrintJobUiModel> = emptyList(),
+    val printHistory: List<PrintHistoryJobUiModel> = emptyList(),
     val message: String? = null,
 )
 
 class ConsumableViewModel(
     private val repository: FilamentRepository,
     private val syncSettingsStore: SyncSettingsStore,
+    private val lanEndpointDiscovery: DesktopLanEndpointDiscovery = DesktopLanEndpointDiscovery(),
 ) : ViewModel() {
     private val messageState = MutableStateFlow<String?>(null)
+    private val isDiscoveringLanState = MutableStateFlow(false)
     private val rollsFlow = repository.observeRolls().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
@@ -113,6 +135,11 @@ class ConsumableViewModel(
         initialValue = emptyList(),
     )
     private val pendingJobsFlow = repository.observePendingPrintJobs().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList(),
+    )
+    private val printHistoryFlow = repository.observePrintHistory().stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
@@ -138,17 +165,31 @@ class ConsumableViewModel(
         rollsFlow,
         recentEventsFlow,
         pendingJobsFlow,
+        printHistoryFlow,
         syncStateFlow,
-        syncSettingsFlow,
-    ) { rolls, recentEvents, pendingJobs, syncState, syncSettings ->
-        CombinedUiData(
+    ) { rolls, recentEvents, pendingJobs, printHistory, syncState ->
+        CombinedCoreUiData(
             rolls = rolls,
             recentEvents = recentEvents,
             pendingJobs = pendingJobs,
+            printHistory = printHistory,
             syncState = syncState,
-            syncSettings = syncSettings,
         )
     }
+        .combine(syncSettingsFlow) { data, syncSettings ->
+            CombinedUiData(
+                rolls = data.rolls,
+                recentEvents = data.recentEvents,
+                pendingJobs = data.pendingJobs,
+                printHistory = data.printHistory,
+                syncState = data.syncState,
+                syncSettings = syncSettings,
+                isDiscoveringLan = false,
+            )
+        }
+        .combine(isDiscoveringLanState) { data, isDiscoveringLan ->
+            data.copy(isDiscoveringLan = isDiscoveringLan)
+        }
 
     val uiState: StateFlow<ConsumableUiState> = combine(
         combinedDataFlow,
@@ -165,8 +206,9 @@ class ConsumableViewModel(
             rolls = rollItems,
             activeRoll = rollItems.firstOrNull { it.isActive },
             recentEvents = mapRecentEvents(data.rolls, data.recentEvents).map(FilamentEventItem::toUiModel),
-            syncStatus = toSyncStatusUi(data.syncState, data.pendingJobs, data.syncSettings),
+            syncStatus = toSyncStatusUi(data.syncState, data.pendingJobs, data.syncSettings, data.isDiscoveringLan),
             pendingPrintJobs = data.pendingJobs.map(PrintJobEntity::toUiModel),
+            printHistory = data.printHistory.map(PrintJobEntity::toHistoryUiModel),
             message = message,
         )
     }.stateIn(
@@ -213,6 +255,13 @@ class ConsumableViewModel(
         }
     }
 
+    fun deleteRoll(rollId: Long) {
+        viewModelScope.launch {
+            val result = repository.deleteRoll(rollId)
+            messageState.value = result.message
+        }
+    }
+
     fun saveDesktopSyncAddress(baseUrl: String) {
         syncSettingsStore.updateDesktopBaseUrl(baseUrl)
         messageState.value = if (syncSettingsStore.currentSettings().desktopBaseUrl.isBlank()) {
@@ -226,6 +275,46 @@ class ConsumableViewModel(
         viewModelScope.launch {
             val result = repository.pullSync()
             messageState.value = result.message
+        }
+    }
+
+    fun autoDiscoverLanDesktop() {
+        viewModelScope.launch {
+            isDiscoveringLanState.value = true
+            try {
+                when (val result = lanEndpointDiscovery.discover()) {
+                    is DesktopLanDiscoveryResult.Success -> {
+                        syncSettingsStore.updateDesktopBaseUrl(result.baseUrl)
+                        val pullResult = repository.pullSync()
+                        messageState.value = "已自动发现局域网地址 ${result.baseUrl}。${pullResult.message}"
+                    }
+
+                    is DesktopLanDiscoveryResult.NotFound -> {
+                        messageState.value = result.message
+                    }
+
+                    is DesktopLanDiscoveryResult.Unsupported -> {
+                        messageState.value = result.message
+                    }
+                }
+            } catch (exception: Exception) {
+                messageState.value = "自动发现失败：${exception.message ?: "请稍后重试"}"
+            } finally {
+                isDiscoveringLanState.value = false
+            }
+        }
+    }
+
+    fun pairWithScannedDesktopAddress(rawValue: String?) {
+        val normalized = normalizeScannedDesktopBaseUrl(rawValue)
+        if (normalized == null) {
+            messageState.value = "无法识别二维码里的桌面地址，请重新扫描桌面端二维码"
+            return
+        }
+        syncSettingsStore.updateDesktopBaseUrl(normalized)
+        viewModelScope.launch {
+            val result = repository.pullSync()
+            messageState.value = "已通过二维码写入桌面地址。${result.message}"
         }
     }
 
@@ -282,7 +371,9 @@ class ConsumableViewModel(
         syncState: SyncStateEntity?,
         pendingJobs: List<PrintJobEntity>,
         syncSettings: SyncSettings,
+        isDiscoveringLan: Boolean,
     ): SyncStatusUiModel {
+        val addressKind = classifyDesktopBaseUrl(syncSettings.desktopBaseUrl)
         return SyncStatusUiModel(
             status = syncState?.status ?: SyncConnectionStatus.IDLE,
             source = syncState?.lastSyncSource ?: SyncSourceType.MANUAL,
@@ -291,6 +382,9 @@ class ConsumableViewModel(
             pendingCount = pendingJobs.count { it.status == PrintJobStatus.DRAFT },
             desktopBaseUrl = syncSettings.desktopBaseUrl,
             isConfigured = syncSettings.desktopBaseUrl.isNotBlank(),
+            addressKind = addressKind,
+            addressKindLabel = addressKind.toUiLabel(),
+            isDiscoveringLan = isDiscoveringLan,
         )
     }
 }
@@ -299,8 +393,18 @@ private data class CombinedUiData(
     val rolls: List<FilamentRollEntity>,
     val recentEvents: List<FilamentEventEntity>,
     val pendingJobs: List<PrintJobEntity>,
+    val printHistory: List<PrintJobEntity>,
     val syncState: SyncStateEntity?,
     val syncSettings: SyncSettings,
+    val isDiscoveringLan: Boolean,
+)
+
+private data class CombinedCoreUiData(
+    val rolls: List<FilamentRollEntity>,
+    val recentEvents: List<FilamentEventEntity>,
+    val pendingJobs: List<PrintJobEntity>,
+    val printHistory: List<PrintJobEntity>,
+    val syncState: SyncStateEntity?,
 )
 
 class ConsumableViewModelFactory(
@@ -328,6 +432,19 @@ private fun PrintJobEntity.toUiModel(): PendingPrintJobUiModel {
     )
 }
 
+private fun PrintJobEntity.toHistoryUiModel(): PrintHistoryJobUiModel {
+    return PrintHistoryJobUiModel(
+        id = id,
+        modelName = modelName,
+        sourceLabel = source.toUiLabel(),
+        estimatedUsageGrams = estimatedUsageGrams,
+        targetMaterial = targetMaterial,
+        note = note,
+        createdAtLabel = formatTimestamp(createdAt),
+        confirmedAtLabel = formatTimestamp(confirmedAt ?: createdAt),
+    )
+}
+
 private fun FilamentEventItem.toUiModel(): RecentEventUiModel {
     val actionText = when (type) {
         "CALIBRATION" -> "$rollLabel 校准到 ${remainingAfterGrams}g"
@@ -351,4 +468,12 @@ private fun SyncSourceType.toUiLabel(): String = when (this) {
     SyncSourceType.MANUAL -> "手动"
     SyncSourceType.DESKTOP_AGENT -> "桌面同步"
     SyncSourceType.CLOUD -> "云同步"
+}
+
+private fun DesktopEndpointKind.toUiLabel(): String = when (this) {
+    DesktopEndpointKind.NONE -> "未设置"
+    DesktopEndpointKind.TAILSCALE -> "Tailscale IP"
+    DesktopEndpointKind.MAGIC_DNS -> "MagicDNS"
+    DesktopEndpointKind.LAN -> "局域网"
+    DesktopEndpointKind.CUSTOM -> "自定义"
 }

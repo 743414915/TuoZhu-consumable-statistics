@@ -11,11 +11,15 @@ import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -61,6 +65,11 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.plaf.basic.BasicButtonUI;
 import javax.swing.plaf.basic.BasicSplitPaneDivider;
 import javax.swing.plaf.basic.BasicSplitPaneUI;
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.WriterException;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
 
 public final class DesktopSyncApp extends JFrame {
     private static final Color PAGE = new Color(0x0B1118);
@@ -83,7 +92,7 @@ public final class DesktopSyncApp extends JFrame {
     private static final String STATUS_RUNNING = "\u8fd0\u884c\u4e2d";
     private static final String STATUS_STOPPING = "\u505c\u6b62\u4e2d";
     private static final String STATUS_ERROR = "\u9519\u8bef";
-    private static final String BUTTON_SCAN = "\u626b\u63cf\u4e00\u6b21";
+    private static final String BUTTON_SCAN = "\u624b\u52a8\u626b\u63cf\u8fd1\u5207\u7247";
     private static final String BUTTON_SCANNING = "\u626b\u63cf\u4e2d...";
     private static final String FONT_UI = resolveFontName(
         "Microsoft YaHei UI",
@@ -102,9 +111,13 @@ public final class DesktopSyncApp extends JFrame {
     private final JTextField maxAgeField;
     private final JLabel serviceStatusValue;
     private final JLabel endpointValue;
+    private final JLabel lanEndpointValue;
+    private final JLabel watchStatusValue;
     private final JLabel pendingDraftsValue;
     private final JLabel warningsValue;
     private final JLabel lastSyncValue;
+    private final JLabel pairingQrLabel;
+    private final JLabel pairingQrHint;
     private final JTextArea previewArea;
     private final JTextArea warningsArea;
     private final JTextArea logArea;
@@ -114,7 +127,7 @@ public final class DesktopSyncApp extends JFrame {
     private final JRadioButton sampleModeButton;
     private final JRadioButton bambuModeButton;
 
-    private volatile Process serverProcess;
+    private volatile EmbeddedSyncService embeddedSyncService;
     private final Timer snapshotTimer;
 
     public static void main(String[] args) {
@@ -133,9 +146,13 @@ public final class DesktopSyncApp extends JFrame {
         this.maxAgeField = new JTextField("7");
         this.serviceStatusValue = statValue(STATUS_STOPPED);
         this.endpointValue = statValue(buildEndpointHint());
+        this.lanEndpointValue = statValue("\u6682\u65e0\u53ef\u7528\u5730\u5740");
+        this.watchStatusValue = statValue("\u672a\u542f\u7528");
         this.pendingDraftsValue = statValue("--");
         this.warningsValue = statValue("--");
         this.lastSyncValue = statValue("\u5c1a\u672a\u540c\u6b65");
+        this.pairingQrLabel = new JLabel();
+        this.pairingQrHint = new JLabel("\u542f\u52a8\u670d\u52a1\u540e\u4f1a\u5728\u8fd9\u91cc\u751f\u6210\u624b\u673a\u626b\u7801\u914d\u5bf9\u4e8c\u7ef4\u7801");
         this.previewArea = buildReadOnlyArea();
         this.warningsArea = buildReadOnlyArea();
         this.logArea = buildReadOnlyArea();
@@ -191,7 +208,7 @@ public final class DesktopSyncApp extends JFrame {
         title.setFont(uiFont(Font.BOLD, 30));
 
         JLabel subtitle = new JLabel(
-            "\u684c\u9762\u7aef\u7528\u4e8e\u626b\u63cf Bambu \u5207\u7247\u3001\u5f00\u542f\u5c40\u57df\u7f51\u540c\u6b65\uff0c\u5e76\u56de\u5199\u624b\u673a\u786e\u8ba4\u7ed3\u679c\u3002"
+            "\u684c\u9762\u7aef\u8d1f\u8d23\u76d1\u542c Bambu \u5207\u7247\u7f13\u5b58\uff0c\u81ea\u52a8\u6355\u83b7 G-code\uff0c\u63d0\u4f9b\u5185\u7f6e\u540c\u6b65\u670d\u52a1\uff0c\u5e76\u4f18\u5148\u652f\u6301 Tailscale \u8fde\u63a5\u3002"
         );
         subtitle.setForeground(MUTED);
         subtitle.setFont(uiFont(Font.PLAIN, 13));
@@ -203,7 +220,9 @@ public final class DesktopSyncApp extends JFrame {
         JPanel stats = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         stats.setOpaque(false);
         stats.add(statCard("\u670d\u52a1\u72b6\u6001", serviceStatusValue));
-        stats.add(statCard("\u624b\u673a\u8bbf\u95ee\u5730\u5740", endpointValue));
+        stats.add(statCard("\u4e3b\u63a8\u8350\u5730\u5740", endpointValue));
+        stats.add(statCard("\u5c40\u57df\u7f51\u5907\u7528\u5730\u5740", lanEndpointValue));
+        stats.add(statCard("G-code \u76d1\u542c", watchStatusValue));
         stats.add(statCard("\u5f85\u786e\u8ba4\u6570", pendingDraftsValue));
         stats.add(statCard("\u8b66\u544a\u6570", warningsValue));
         stats.add(statCard("\u6700\u8fd1\u540c\u6b65", lastSyncValue));
@@ -237,7 +256,7 @@ public final class DesktopSyncApp extends JFrame {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
 
         panel.add(sectionTitle("\u540c\u6b65\u63a7\u5236"));
-        panel.add(sectionHint("\u5355\u6b21\u626b\u63cf\u9002\u5408\u7acb\u5373\u66f4\u65b0\uff0c\u6301\u7eed\u8fd0\u884c\u670d\u52a1\u9002\u5408\u624b\u673a\u7aef\u968f\u65f6\u62c9\u53d6\u3002"));
+        panel.add(sectionHint("\u542f\u52a8\u670d\u52a1\u540e\u4f1a\u81ea\u52a8\u76d1\u542c Bambu Studio \u7f13\u5b58\u76ee\u5f55\uff0c\u53d1\u73b0\u65b0\u5207\u7247\u540e\u4f1a\u5148\u7b49\u6587\u4ef6\u5199\u5165\u7a33\u5b9a\uff0c\u518d\u81ea\u52a8\u8f6c\u5165\u8349\u7a3f\u3002\u624b\u52a8\u626b\u63cf\u53ea\u7528\u4e8e\u5149\u542c\u7f51\u6355\u5076\u53d1\u6f0f\u6355\u65f6\u7684\u5160\u5e95\u3002"));
         panel.add(Box.createVerticalStrut(16));
         panel.add(formRow("\u684c\u9762\u540c\u6b65\u76ee\u5f55", agentRootField, textButton("\u6d4f\u89c8", event -> chooseDirectory(agentRootField))));
         panel.add(Box.createVerticalStrut(12));
@@ -253,6 +272,8 @@ public final class DesktopSyncApp extends JFrame {
         actions.add(scanButton);
         actions.add(startServiceButton);
         actions.add(stopServiceButton);
+        actions.add(textButton("\u590d\u5236\u63a8\u8350\u5730\u5740", event -> copyRecommendedEndpoint()));
+        actions.add(textButton("\u5237\u65b0\u63a8\u8350\u5730\u5740", event -> refreshRecommendedEndpoint()));
         actions.add(textButton("\u6253\u5f00\u8f93\u51fa\u76ee\u5f55", event -> openPath(agentRoot().resolve("outbox"))));
         actions.add(textButton("\u6253\u5f00\u72b6\u6001\u76ee\u5f55", event -> openPath(agentRoot().resolve("state"))));
         panel.add(actions);
@@ -264,9 +285,9 @@ public final class DesktopSyncApp extends JFrame {
         panel.add(separator);
         panel.add(Box.createVerticalStrut(16));
         panel.add(sectionTitle("\u4f7f\u7528\u63d0\u793a"));
-        panel.add(sectionHint("\u5efa\u8bae\u6d41\u7a0b\uff1a\u5148\u542f\u52a8\u670d\u52a1\uff0c\u518d\u628a\u624b\u673a\u8bbf\u95ee\u5730\u5740\u586b\u5165 Android \u5e94\u7528\uff0c\u7136\u540e\u7531\u624b\u673a\u7aef\u62c9\u53d6\u5e76\u786e\u8ba4\u4efb\u52a1\u3002"));
+        panel.add(sectionHint("\u5efa\u8bae\u6d41\u7a0b\uff1a\u5148\u542f\u52a8\u670d\u52a1\uff0c\u4fdd\u6301 Bambu Studio \u8fd0\u884c\uff0c\u5b8c\u6210\u5207\u7247\u540e\u7531\u684c\u9762\u7aef\u81ea\u52a8\u6355\u83b7\u5e76\u5165\u8349\u7a3f\uff0c\u624b\u673a\u7aef\u518d\u62c9\u53d6\u3001\u786e\u8ba4\u8017\u6750\u3002"));
         panel.add(Box.createVerticalStrut(8));
-        panel.add(sectionHint("\u5f53\u524d GUI \u662f\u684c\u9762\u5165\u53e3\uff0c\u5e95\u5c42\u540c\u6b65\u5f15\u64ce\u4ecd\u517c\u5bb9\u73b0\u6709 JSON \u6587\u4ef6\u548c PowerShell \u811a\u672c\u3002"));
+        panel.add(sectionHint("\u5f53\u524d GUI \u5df2\u5185\u7f6e HTTP \u540c\u6b65\u670d\u52a1\uff0c\u5e95\u5c42\u4ecd\u4f7f\u7528 PowerShell \u540c\u6b65\u5f15\u64ce\u751f\u6210\u8349\u7a3f\u548c\u72b6\u6001\u3002"));
         return panel;
     }
 
@@ -274,6 +295,11 @@ public final class DesktopSyncApp extends JFrame {
         JPanel panel = cardPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
 
+        panel.add(sectionTitle("\u626b\u7801\u914d\u5bf9"));
+        panel.add(sectionHint("\u624b\u673a\u7aef\u70b9\u51fb\u201c\u626b\u7801\u914d\u5bf9\u201d\u540e\uff0c\u76f4\u63a5\u626b\u63cf\u8fd9\u4e2a\u4e8c\u7ef4\u7801\u5373\u53ef\u5199\u5165\u540c\u6b65\u5730\u5740\u3002"));
+        panel.add(Box.createVerticalStrut(12));
+        panel.add(buildPairingQrPanel());
+        panel.add(Box.createVerticalStrut(16));
         panel.add(sectionTitle("\u5f85\u786e\u8ba4\u9884\u89c8"));
         panel.add(sectionHint("\u53f3\u4fa7\u4f1a\u76f4\u63a5\u5c55\u793a outbox \u548c state \u63a5\u4e0b\u6765\u4f1a\u88ab\u624b\u673a\u7aef\u770b\u5230\u7684\u5185\u5bb9\u3002"));
         panel.add(Box.createVerticalStrut(12));
@@ -293,6 +319,21 @@ public final class DesktopSyncApp extends JFrame {
         return panel;
     }
 
+    private JPanel buildPairingQrPanel() {
+        JPanel panel = new JPanel();
+        panel.setOpaque(false);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        pairingQrLabel.setAlignmentX(LEFT_ALIGNMENT);
+        pairingQrLabel.setPreferredSize(new Dimension(212, 212));
+        pairingQrHint.setAlignmentX(LEFT_ALIGNMENT);
+        pairingQrHint.setForeground(MUTED);
+        pairingQrHint.setFont(uiFont(Font.PLAIN, 12));
+        panel.add(pairingQrLabel);
+        panel.add(Box.createVerticalStrut(10));
+        panel.add(pairingQrHint);
+        return panel;
+    }
+
     private void installActions() {
         ButtonGroup group = new ButtonGroup();
         group.add(sampleModeButton);
@@ -302,6 +343,8 @@ public final class DesktopSyncApp extends JFrame {
         scanButton.addActionListener(event -> runOneShotSync());
         startServiceButton.addActionListener(event -> startService());
         stopServiceButton.addActionListener(event -> stopService());
+        sampleModeButton.addActionListener(event -> refreshWatchStatus());
+        bambuModeButton.addActionListener(event -> refreshWatchStatus());
     }
 
     private JPanel modeSelector() {
@@ -314,7 +357,7 @@ public final class DesktopSyncApp extends JFrame {
 
     private void runOneShotSync() {
         setBusy(scanButton, true);
-        appendLog("\u5f00\u59cb\u6267\u884c\u5355\u6b21\u626b\u63cf...");
+        appendLog("[\u76d1\u542c] \u624b\u52a8\u89e6\u53d1\u8fd1\u671f\u5207\u7247\u626b\u63cf...");
         new SwingWorker<Integer, String>() {
             @Override
             protected Integer doInBackground() throws Exception {
@@ -327,9 +370,9 @@ public final class DesktopSyncApp extends JFrame {
                 setBusy(scanButton, false);
                 try {
                     int exitCode = get();
-                    appendLog("\u5355\u6b21\u626b\u63cf\u5b8c\u6210\uff0c\u9000\u51fa\u7801 " + exitCode + "\u3002");
+                    appendLog("\u624b\u52a8\u626b\u63cf\u5b8c\u6210\uff0c\u9000\u51fa\u7801 " + exitCode + "\u3002");
                 } catch (Exception exception) {
-                    appendLog("\u5355\u6b21\u626b\u63cf\u5931\u8d25\uff1a" + exception.getMessage());
+                    appendLog("\u624b\u52a8\u626b\u63cf\u5931\u8d25\uff1a" + exception.getMessage());
                     showError(exception.getMessage());
                 }
                 refreshSnapshot();
@@ -338,61 +381,50 @@ public final class DesktopSyncApp extends JFrame {
     }
 
     private void startService() {
-        if (serverProcess != null && serverProcess.isAlive()) {
+        if (embeddedSyncService != null && embeddedSyncService.isRunning()) {
             appendLog("\u540c\u6b65\u670d\u52a1\u5df2\u5728\u8fd0\u884c\u3002");
             return;
         }
         try {
-            serverProcess = buildProcess(true).start();
+            embeddedSyncService = new EmbeddedSyncService(this::currentServiceConfig, line -> appendLog("[\u670d\u52a1] " + line));
             serviceStatusValue.setText(STATUS_STARTING);
             serviceStatusValue.setForeground(WARN);
+            watchStatusValue.setText("\u521d\u59cb\u5316\u4e2d");
+            watchStatusValue.setForeground(WARN);
             appendLog("\u684c\u9762\u540c\u6b65\u670d\u52a1\u542f\u52a8\u4e2d...");
-            appendLog("\u5efa\u8bae\u5728\u624b\u673a\u7aef\u586b\u5199\uff1a" + buildEndpointHint());
-            Thread pumpThread = new Thread(() -> {
-                try {
-                    int exitCode = pumpProcess(serverProcess, "[\u670d\u52a1]");
-                    SwingUtilities.invokeLater(() -> {
-                        appendLog("\u684c\u9762\u540c\u6b65\u670d\u52a1\u5df2\u505c\u6b62\uff0c\u9000\u51fa\u7801 " + exitCode + "\u3002");
-                        serviceStatusValue.setText(STATUS_STOPPED);
-                        serviceStatusValue.setForeground(MUTED);
-                        serverProcess = null;
-                        refreshSnapshot();
-                    });
-                } catch (Exception exception) {
-                    SwingUtilities.invokeLater(() -> {
-                        appendLog("\u684c\u9762\u540c\u6b65\u670d\u52a1\u5f02\u5e38\uff1a" + exception.getMessage());
-                        serviceStatusValue.setText(STATUS_ERROR);
-                        serviceStatusValue.setForeground(ERROR);
-                        serverProcess = null;
-                    });
-                }
-            }, "desktop-sync-service-pump");
-            pumpThread.setDaemon(true);
-            pumpThread.start();
+            embeddedSyncService.start();
+            logRecommendedEndpoints();
             serviceStatusValue.setText(STATUS_RUNNING);
             serviceStatusValue.setForeground(SUCCESS);
+            refreshWatchStatus();
         } catch (IOException exception) {
             appendLog("\u542f\u52a8\u684c\u9762\u540c\u6b65\u670d\u52a1\u5931\u8d25\uff1a" + exception.getMessage());
             serviceStatusValue.setText(STATUS_ERROR);
             serviceStatusValue.setForeground(ERROR);
-            serverProcess = null;
+            watchStatusValue.setText("\u542f\u52a8\u5931\u8d25");
+            watchStatusValue.setForeground(ERROR);
+            embeddedSyncService = null;
             showError(exception.getMessage());
         }
     }
 
     private void stopService() {
-        if (serverProcess == null || !serverProcess.isAlive()) {
+        if (embeddedSyncService == null || !embeddedSyncService.isRunning()) {
             appendLog("\u540c\u6b65\u670d\u52a1\u672a\u5728\u8fd0\u884c\u3002");
             return;
         }
         appendLog("\u6b63\u5728\u505c\u6b62\u684c\u9762\u540c\u6b65\u670d\u52a1...");
-        serverProcess.destroy();
+        embeddedSyncService.stop();
+        embeddedSyncService = null;
         serviceStatusValue.setText(STATUS_STOPPING);
         serviceStatusValue.setForeground(WARN);
+        serviceStatusValue.setText(STATUS_STOPPED);
+        serviceStatusValue.setForeground(MUTED);
+        refreshWatchStatus();
     }
 
     private int pumpProcess(Process process, String prefix) throws IOException, InterruptedException {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), processOutputCharset()))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 appendLog(prefix + " " + line);
@@ -402,22 +434,17 @@ public final class DesktopSyncApp extends JFrame {
     }
 
     private ProcessBuilder buildProcess(boolean serverMode) {
-        Path scriptPath = serverMode
-            ? agentRoot().resolve("start-sync-server.ps1")
-            : agentRoot().resolve("run-sync-agent.ps1");
+        if (serverMode) {
+            throw new IllegalArgumentException("Embedded desktop server no longer uses the PowerShell server mode.");
+        }
+        Path scriptPath = agentRoot().resolve("run-sync-agent.ps1");
         List<String> command = new ArrayList<>();
         command.add(resolvePowerShellExecutable());
+        command.add("-NoProfile");
         command.add("-ExecutionPolicy");
         command.add("Bypass");
         command.add("-File");
         command.add(scriptPath.toString());
-
-        if (serverMode) {
-            command.add("-ListenHost");
-            command.add("+");
-            command.add("-Port");
-            command.add(safeText(portField.getText(), "8823"));
-        }
 
         command.add("-MaxFileAgeDays");
         command.add(safeText(maxAgeField.getText(), "7"));
@@ -444,13 +471,31 @@ public final class DesktopSyncApp extends JFrame {
         pendingDraftsValue.setText(Integer.toString(snapshot.pendingDrafts));
         warningsValue.setText(Integer.toString(snapshot.warningCount));
         lastSyncValue.setText(snapshot.lastSyncLabel);
-        endpointValue.setText(snapshot.endpointLabel);
+        EndpointSelection selection = resolveEndpointSelection();
+        updateEndpointDisplay(selection);
         previewArea.setText(snapshot.previewText);
         warningsArea.setText(snapshot.warningText);
-        if ((serverProcess == null || !serverProcess.isAlive()) && !STATUS_STOPPED.equals(serviceStatusValue.getText())) {
+        refreshPairingQr(selection);
+        refreshWatchStatus();
+        if ((embeddedSyncService == null || !embeddedSyncService.isRunning()) && !STATUS_STOPPED.equals(serviceStatusValue.getText())) {
             serviceStatusValue.setText(STATUS_STOPPED);
             serviceStatusValue.setForeground(MUTED);
         }
+    }
+
+    private void refreshWatchStatus() {
+        if (embeddedSyncService == null || !embeddedSyncService.isRunning()) {
+            watchStatusValue.setText("\u672a\u542f\u7528");
+            watchStatusValue.setForeground(MUTED);
+            return;
+        }
+        if (sampleModeButton.isSelected()) {
+            watchStatusValue.setText("\u793a\u4f8b\u6a21\u5f0f");
+            watchStatusValue.setForeground(WARN);
+            return;
+        }
+        watchStatusValue.setText("\u7b49\u5f85\u5207\u7247");
+        watchStatusValue.setForeground(SUCCESS);
     }
 
     private void chooseDirectory(JTextField targetField) {
@@ -485,6 +530,95 @@ public final class DesktopSyncApp extends JFrame {
         JOptionPane.showMessageDialog(this, message, APP_TITLE, JOptionPane.ERROR_MESSAGE);
     }
 
+    private void copyRecommendedEndpoint() {
+        EndpointSelection selection = resolveEndpointSelection();
+        EndpointCandidate candidate = selection.primary();
+        if (candidate == null) {
+            showError("\u5f53\u524d\u672a\u627e\u5230\u53ef\u590d\u5236\u7684\u63a8\u8350\u5730\u5740\u3002");
+            return;
+        }
+        try {
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(candidate.url()), null);
+            updateEndpointDisplay(selection);
+            appendLog("\u5df2\u590d\u5236" + candidate.label() + "\uff1a" + candidate.url());
+        } catch (Exception exception) {
+            showError("\u590d\u5236\u5730\u5740\u5931\u8d25\uff1a" + exception.getMessage());
+        }
+    }
+
+    private void refreshRecommendedEndpoint() {
+        EndpointSelection selection = resolveEndpointSelection();
+        updateEndpointDisplay(selection);
+        refreshPairingQr(selection);
+        logRecommendedEndpoints(selection);
+        if (selection.primary() != null) {
+            appendLog("\u63a8\u8350\u5730\u5740\u5df2\u5237\u65b0\uff1a" + selection.primary().url());
+        }
+    }
+
+    private void updateEndpointDisplay(EndpointSelection selection) {
+        if (selection == null || selection.primary() == null) {
+            endpointValue.setText("\u6682\u65e0\u53ef\u7528\u5730\u5740");
+            lanEndpointValue.setText("\u6682\u65e0\u53ef\u7528\u5730\u5740");
+            return;
+        }
+        endpointValue.setText(formatEndpointLabel(selection.primary()));
+        if (selection.lan() != null) {
+            lanEndpointValue.setText(formatEndpointLabel(selection.lan()));
+        } else {
+            lanEndpointValue.setText("<html><div style='color:#9EADBF;line-height:1.3;'>\u6682\u65e0\u53ef\u7528\u7684\u5c40\u57df\u7f51\u5907\u7528\u5730\u5740</div></html>");
+        }
+    }
+
+    private String formatEndpointLabel(EndpointCandidate candidate) {
+        boolean serviceRunning = embeddedSyncService != null && embeddedSyncService.isRunning();
+        String reachText = serviceRunning
+            ? (candidate.reachable() ? "\u5df2\u901a\u8fc7\u68c0\u6d4b\u5b9e\u73b0\u53ef\u8fde\u63a5" : "\u6682\u672a\u7ecf\u8fc7\u8fde\u63a5\u68c0\u6d4b")
+            : "\u7b49\u5f85\u670d\u52a1\u5f00\u542f";
+        return "<html><div style='line-height:1.3;max-width:260px;'><span style='font-size:11px;color:#9EADBF;'>" + candidate.label() + " · " + reachText + "</span><br><span style='font-size:13px;'>" + candidate.url() + "</span></div></html>";
+    }
+
+    private void refreshPairingQr(EndpointSelection selection) {
+        if (embeddedSyncService == null || !embeddedSyncService.isRunning()) {
+            pairingQrLabel.setIcon(null);
+            pairingQrLabel.setText("\u8bf7\u5148\u542f\u52a8\u670d\u52a1");
+            pairingQrHint.setText("\u542f\u52a8\u670d\u52a1\u540e\uff0c\u4f1a\u81ea\u52a8\u751f\u6210\u5f53\u524d\u63a8\u8350\u5730\u5740\u7684\u4e8c\u7ef4\u7801");
+            return;
+        }
+
+        if (selection == null || selection.primary() == null) {
+            pairingQrLabel.setIcon(null);
+            pairingQrLabel.setText("\u672a\u627e\u5230\u53ef\u914d\u5bf9\u5730\u5740");
+            pairingQrHint.setText("\u8bf7\u7a0d\u540e\u5237\u65b0\uff0c\u6216\u6539\u7528\u624b\u52a8\u8f93\u5165\u540c\u6b65\u5730\u5740");
+            return;
+        }
+
+        EndpointCandidate candidate = selection.primary();
+        try {
+            pairingQrLabel.setIcon(new javax.swing.ImageIcon(generateQrCodeImage(candidate.url(), 208)));
+            pairingQrLabel.setText("");
+            if (selection.lan() != null) {
+                pairingQrHint.setText(
+                    "\u5f53\u524d\u4e8c\u7ef4\u7801\u5185\u5bb9\uff08\u4e3b\u63a8\u8350\uff09\uff1a" +
+                    candidate.url() +
+                    "\u3002\u540c\u4e00 Wi\u2011Fi \u5907\u7528\uff1a" +
+                    selection.lan().url()
+                );
+            } else {
+                pairingQrHint.setText("\u5f53\u524d\u4e8c\u7ef4\u7801\u5185\u5bb9\uff08\u4e3b\u63a8\u8350\uff09\uff1a" + candidate.url());
+            }
+        } catch (WriterException exception) {
+            pairingQrLabel.setIcon(null);
+            pairingQrLabel.setText("\u4e8c\u7ef4\u7801\u751f\u6210\u5931\u8d25");
+            pairingQrHint.setText("\u8bf7\u5148\u590d\u5236\u63a8\u8350\u5730\u5740\u624b\u52a8\u7c98\u8d34\u5230\u624b\u673a\uff1a" + candidate.url());
+        }
+    }
+
+    private static BufferedImage generateQrCodeImage(String content, int size) throws WriterException {
+        BitMatrix matrix = new QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size);
+        return MatrixToImageWriter.toBufferedImage(matrix);
+    }
+
     private void appendLog(String line) {
         SwingUtilities.invokeLater(() -> {
             String timestamp = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new java.util.Date());
@@ -494,7 +628,7 @@ public final class DesktopSyncApp extends JFrame {
     }
 
     private void shutdown() {
-        if (serverProcess != null && serverProcess.isAlive()) {
+        if (embeddedSyncService != null && embeddedSyncService.isRunning()) {
             int result = JOptionPane.showConfirmDialog(
                 this,
                 "\u684c\u9762\u540c\u6b65\u670d\u52a1\u4ecd\u5728\u8fd0\u884c\uff0c\u662f\u5426\u5148\u505c\u6b62\u670d\u52a1\u518d\u5173\u95ed\u5e94\u7528\uff1f",
@@ -738,7 +872,12 @@ public final class DesktopSyncApp extends JFrame {
     }
 
     private String buildEndpointHint() {
-        return "http://" + resolveLocalIp() + ":" + safeText(portField.getText(), "8823");
+        EndpointSelection selection = resolveEndpointSelection();
+        EndpointCandidate primary = selection.primary();
+        if (primary != null) {
+            return primary.url();
+        }
+        return "http://127.0.0.1:" + safeText(portField.getText(), "8823");
     }
 
     private String defaultSearchRoots() {
@@ -754,7 +893,7 @@ public final class DesktopSyncApp extends JFrame {
         return String.join(System.lineSeparator(), roots);
     }
 
-    private static String resolvePowerShellExecutable() {
+    static String resolvePowerShellExecutable() {
         String systemRoot = System.getenv("SystemRoot");
         if (systemRoot != null) {
             Path path = Paths.get(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -763,6 +902,10 @@ public final class DesktopSyncApp extends JFrame {
             }
         }
         return "powershell.exe";
+    }
+
+    static Charset processOutputCharset() {
+        return Charset.defaultCharset();
     }
 
     private static Path locateWorkspaceRoot() {
@@ -797,9 +940,10 @@ public final class DesktopSyncApp extends JFrame {
         return workspaceRoot.resolve("desktop-agent");
     }
 
-    private static String resolveLocalIp() {
+    private List<EndpointCandidate> resolveEndpointCandidates() {
         try {
-            List<IpCandidate> candidates = new ArrayList<>();
+            List<EndpointCandidate> candidates = new ArrayList<>();
+            String port = safeText(portField.getText(), "8823");
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
                 NetworkInterface network = interfaces.nextElement();
@@ -812,16 +956,27 @@ public final class DesktopSyncApp extends JFrame {
                     if (!(address instanceof Inet4Address) || address.isLoopbackAddress() || address.isLinkLocalAddress()) {
                         continue;
                     }
-                    candidates.add(new IpCandidate(address.getHostAddress(), scoreInterface(network, address)));
+                    String ip = address.getHostAddress();
+                    int score = scoreInterface(network, address);
+                    EndpointKind kind = determineEndpointKind(network, address);
+                    String label;
+                    if (kind == EndpointKind.TAILSCALE) {
+                        label = "\u63a8\u8350\u4f7f\u7528\uff08Tailscale/MagicDNS\uff09";
+                    } else if (kind == EndpointKind.LAN) {
+                        label = "\u5c40\u57df\u7f51\u517c\u5bb9\u5730\u5740";
+                    } else {
+                        label = "\u5176\u4ed6\u53ef\u7528\u7f51\u7edc\u5730\u5740";
+                    }
+                    candidates.add(new EndpointCandidate(label, "http://" + ip + ":" + port, score, kind, false));
                 }
             }
-            candidates.sort(Comparator.comparingInt(IpCandidate::score).reversed());
+            candidates.sort(Comparator.comparingInt(EndpointCandidate::score).reversed());
             if (!candidates.isEmpty()) {
-                return candidates.get(0).ip();
+                return populateReachability(deduplicateEndpoints(candidates));
             }
         } catch (Exception ignored) {
         }
-        return "127.0.0.1";
+        return List.of(new EndpointCandidate("\u5f53\u524d\u53ef\u7528\u5730\u5740", "http://127.0.0.1:" + safeText(portField.getText(), "8823"), 0, EndpointKind.OTHER, false));
     }
 
     private static int scoreInterface(NetworkInterface network, InetAddress address) throws Exception {
@@ -829,6 +984,9 @@ public final class DesktopSyncApp extends JFrame {
         String ip = address.getHostAddress();
         int score = 0;
 
+        if (isTailscaleAddress(network, ip)) {
+            score += 500;
+        }
         if (address.isSiteLocalAddress()) {
             score += 200;
         }
@@ -866,7 +1024,142 @@ public final class DesktopSyncApp extends JFrame {
         return score;
     }
 
-    private record IpCandidate(String ip, int score) {
+    private static boolean isTailscaleAddress(NetworkInterface network, String ip) {
+        String name = (network.getName() + " " + network.getDisplayName()).toLowerCase(Locale.ROOT);
+        if (name.contains("tailscale")) {
+            return true;
+        }
+        String[] parts = ip.split("\\.");
+        if (parts.length != 4) {
+            return false;
+        }
+        try {
+            int first = Integer.parseInt(parts[0]);
+            int second = Integer.parseInt(parts[1]);
+            return first == 100 && second >= 64 && second <= 127;
+        } catch (NumberFormatException exception) {
+            return false;
+        }
+    }
+
+    private List<EndpointCandidate> deduplicateEndpoints(List<EndpointCandidate> candidates) {
+        List<EndpointCandidate> deduplicated = new ArrayList<>();
+        for (EndpointCandidate candidate : candidates) {
+            boolean exists = deduplicated.stream().anyMatch(item -> item.url().equals(candidate.url()));
+            if (!exists) {
+                deduplicated.add(candidate);
+            }
+        }
+        return deduplicated;
+    }
+
+    private List<EndpointCandidate> populateReachability(List<EndpointCandidate> candidates) {
+        boolean serviceRunning = embeddedSyncService != null && embeddedSyncService.isRunning();
+        List<EndpointCandidate> result = new ArrayList<>();
+        for (EndpointCandidate candidate : candidates) {
+            boolean reachable = serviceRunning && isEndpointReachable(candidate.url());
+            result.add(new EndpointCandidate(candidate.label(), candidate.url(), candidate.score(), candidate.kind(), reachable));
+        }
+        return result;
+    }
+
+    private EndpointSelection resolveEndpointSelection() {
+        List<EndpointCandidate> candidates = resolveEndpointCandidates();
+        EndpointCandidate primary = selectPrimaryCandidate(candidates);
+        EndpointCandidate lan = selectLanCandidate(candidates, primary);
+        return new EndpointSelection(primary, lan);
+    }
+
+    private EndpointCandidate selectPrimaryCandidate(List<EndpointCandidate> candidates) {
+        return candidates.stream()
+            .max(Comparator.comparingInt(this::primaryPriority))
+            .orElse(null);
+    }
+
+    private int primaryPriority(EndpointCandidate candidate) {
+        int kindScore = candidate.kind() == EndpointKind.TAILSCALE ? 1000 : candidate.kind() == EndpointKind.LAN ? 500 : 0;
+        int reachBonus = candidate.reachable() ? 200 : 0;
+        return kindScore + reachBonus + candidate.score();
+    }
+
+    private EndpointCandidate selectLanCandidate(List<EndpointCandidate> candidates, EndpointCandidate primary) {
+        return candidates.stream()
+            .filter(candidate -> candidate.kind() == EndpointKind.LAN && !candidate.equals(primary))
+            .max(Comparator.comparingInt(this::lanPriority))
+            .orElse(null);
+    }
+
+    private int lanPriority(EndpointCandidate candidate) {
+        int reachBonus = candidate.reachable() ? 1000 : 0;
+        return reachBonus + candidate.score();
+    }
+
+    private EndpointKind determineEndpointKind(NetworkInterface network, InetAddress address) {
+        if (isTailscaleAddress(network, address.getHostAddress())) {
+            return EndpointKind.TAILSCALE;
+        }
+        return address.isSiteLocalAddress() ? EndpointKind.LAN : EndpointKind.OTHER;
+    }
+
+    private boolean isEndpointReachable(String baseUrl) {
+        try {
+            java.net.HttpURLConnection connection = (java.net.HttpURLConnection) new java.net.URL(baseUrl + "/health").openConnection();
+            connection.setConnectTimeout(300);
+            connection.setReadTimeout(300);
+            connection.setUseCaches(false);
+            connection.setRequestProperty("Accept", "application/json");
+            int responseCode = connection.getResponseCode();
+            if (responseCode < 200 || responseCode > 299) {
+                connection.disconnect();
+                return false;
+            }
+            String body = new String(connection.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            connection.disconnect();
+            return body.contains("\"status\":\"ok\"") && body.contains("\"source\":\"DESKTOP_AGENT\"");
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
+    private void logRecommendedEndpoints(EndpointSelection selection) {
+        if (selection == null || selection.primary() == null) {
+            appendLog("\u672a\u627e\u5230\u53ef\u7528\u5730\u5740\uff0c\u8bf7\u7a0d\u540e\u5237\u65b0\u3002");
+            return;
+        }
+        EndpointCandidate primary = selection.primary();
+        appendLog("\u4e3b\u63a8\u8350\uff1a" + primary.label() + "\uff1a" + primary.url());
+        if (selection.lan() != null) {
+            EndpointCandidate lan = selection.lan();
+            appendLog("\u5c40\u57df\u7f51\u5907\u7528\uff1a" + lan.label() + "\uff1a" + lan.url());
+        } else {
+            appendLog("\u5c40\u57df\u7f51\u5907\u7528\uff1a\u6682\u65e0\u53ef\u7528\u5730\u5740");
+        }
+    }
+
+    private void logRecommendedEndpoints() {
+        logRecommendedEndpoints(resolveEndpointSelection());
+    }
+
+    private EmbeddedSyncService.Config currentServiceConfig() {
+        return new EmbeddedSyncService.Config(
+            agentRoot(),
+            Integer.parseInt(safeText(portField.getText(), "8823")),
+            Integer.parseInt(safeText(maxAgeField.getText(), "7")),
+            sampleModeButton.isSelected(),
+            parseSearchRoots()
+        );
+    }
+
+    private record EndpointCandidate(String label, String url, int score, EndpointKind kind, boolean reachable) {
+    }
+
+    private enum EndpointKind {
+        TAILSCALE,
+        LAN,
+        OTHER
+    }
+
+    private record EndpointSelection(EndpointCandidate primary, EndpointCandidate lan) {
     }
 
     private static String resolveFontName(String... candidates) {
@@ -915,7 +1208,6 @@ public final class DesktopSyncApp extends JFrame {
         final int pendingDrafts;
         final int warningCount;
         final String lastSyncLabel;
-        final String endpointLabel;
         final String previewText;
         final String warningText;
 
@@ -923,14 +1215,12 @@ public final class DesktopSyncApp extends JFrame {
             int pendingDrafts,
             int warningCount,
             String lastSyncLabel,
-            String endpointLabel,
             String previewText,
             String warningText
         ) {
             this.pendingDrafts = pendingDrafts;
             this.warningCount = warningCount;
             this.lastSyncLabel = lastSyncLabel;
-            this.endpointLabel = endpointLabel;
             this.previewText = previewText;
             this.warningText = warningText;
         }
@@ -956,7 +1246,6 @@ public final class DesktopSyncApp extends JFrame {
                 jobs.size(),
                 warnings.size(),
                 lastSync,
-                "http://" + resolveLocalIp() + ":" + port,
                 preview,
                 warningText
             );
@@ -1117,4 +1406,5 @@ public final class DesktopSyncApp extends JFrame {
             return builder.toString();
         }
     }
+
 }

@@ -394,6 +394,54 @@ fun WeightChangeDialog(
     )
 }
 
+@Composable
+fun DeleteRollDialog(
+    rollName: String,
+    isActive: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("删除耗材卷", style = MaterialTheme.typography.headlineSmall) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "确认删除 $rollName 吗？",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = if (isActive) {
+                        "这是当前活动卷。删除后如果还有其他耗材卷，系统会自动切换到下一卷；如果这是最后一卷，后续确认打印前需要先新增耗材卷。"
+                    } else {
+                        "删除后，这卷耗材的校准记录和消耗事件会一并移除，已确认的打印历史会保留，但不再绑定到这卷耗材。"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "此操作不可撤销，请确认这卷耗材已经用完、录错，或你明确不再需要保留它的事件记录。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB43A2E),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("确认删除", color = Color(0xFFB43A2E))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
 private fun normalizeHex(value: String): String? {
     val cleaned = value.removePrefix("#").uppercase()
     return if (cleaned.matches(Regex("[0-9A-F]{6}"))) "#$cleaned" else null

@@ -1,8 +1,14 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$jdkHome = Get-ChildItem (Join-Path $projectRoot ".tools\jdk") -Directory | Select-Object -First 1 -ExpandProperty FullName
-$gradleHome = Get-ChildItem (Join-Path $projectRoot ".tools\gradle") -Directory | Where-Object { $_.Name -like "gradle-*" } | Select-Object -First 1 -ExpandProperty FullName
+$jdkHome = Get-ChildItem (Join-Path $projectRoot ".tools\jdk") -Directory |
+    Where-Object { Test-Path (Join-Path $_.FullName "bin\jpackage.exe") } |
+    Sort-Object Name |
+    Select-Object -First 1 -ExpandProperty FullName
+$gradleHome = Get-ChildItem (Join-Path $projectRoot ".tools\gradle") -Directory |
+    Where-Object { $_.Name -like "gradle-*" -and (Test-Path (Join-Path $_.FullName "bin\gradle.bat")) } |
+    Sort-Object Name |
+    Select-Object -First 1 -ExpandProperty FullName
 $gradleUserHome = Join-Path $projectRoot ".tools\gradle-user-home"
 $distRoot = Join-Path $projectRoot "dist\desktop"
 $imageName = "TuoZhuDesktopSync"
@@ -22,13 +28,13 @@ New-Item -ItemType Directory -Force $gradleUserHome | Out-Null
 
 $gradle = Join-Path $gradleHome "bin\gradle.bat"
 $jpackage = Join-Path $jdkHome "bin\jpackage.exe"
-$jarDir = Join-Path $projectRoot "desktop-app\build\libs"
+$jarDir = Join-Path $projectRoot "desktop-app\build\package-input"
 $jarPath = Join-Path $jarDir "desktop-app.jar"
 $imageRoot = Join-Path $distRoot $imageName
 
 Push-Location $projectRoot
 try {
-    & $gradle :desktop-app:clean :desktop-app:jar --no-daemon --stacktrace
+    & $gradle :desktop-app:clean :desktop-app:fatJar --no-daemon --stacktrace
 
     if (-not (Test-Path $jarPath)) {
         throw "Desktop jar not found: $jarPath"

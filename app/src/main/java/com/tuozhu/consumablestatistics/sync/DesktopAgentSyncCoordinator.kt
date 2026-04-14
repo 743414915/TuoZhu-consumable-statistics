@@ -208,38 +208,38 @@ class DesktopAgentSyncCoordinator(
 
     private fun mapPullException(baseUrl: String, exception: Exception): String {
         return when (exception) {
-            is UnknownHostException -> "\u65e0\u6cd5\u89e3\u6790\u684c\u9762\u5730\u5740\uff0c\u8bf7\u68c0\u67e5\u624b\u673a\u4e2d\u586b\u5199\u7684 IP \u6216\u57df\u540d\u662f\u5426\u6b63\u786e"
+            is UnknownHostException -> "无法解析桌面地址，请检查填写的 Tailscale IP、MagicDNS 域名或局域网 IP 是否正确"
             is ConnectException -> {
                 if (isLoopbackHost(baseUrl)) {
-                    "\u624b\u673a\u7aef\u4e0d\u80fd\u4f7f\u7528 localhost \u6216 127.0.0.1\uff0c\u8bf7\u586b\u5199\u7535\u8111\u5728\u540c\u4e00 Wi-Fi \u4e0b\u7684\u5c40\u57df\u7f51 IP\uff0c\u4f8b\u5982 http://192.168.1.8:8823"
+                    "手机端不能使用 localhost 或 127.0.0.1，请填写桌面端推荐的 Tailscale 地址；未使用 Tailscale 时，再填写电脑在同一 Wi‑Fi 下的局域网 IP，例如 http://192.168.1.8:8823"
                 } else {
-                    "\u65e0\u6cd5\u8fde\u63a5\u5230\u684c\u9762\u670d\u52a1\uff0c\u8bf7\u786e\u8ba4\u7535\u8111\u7aef\u670d\u52a1\u5df2\u542f\u52a8\uff0c\u624b\u673a\u4e0e\u7535\u8111\u5728\u540c\u4e00 Wi-Fi\uff0c\u4e14 8823 \u7aef\u53e3\u672a\u88ab\u9632\u706b\u5899\u62e6\u622a"
+                    "无法连接到桌面服务，请先确认电脑端桌面同步程序已启动服务；优先使用桌面端给出的 Tailscale 地址，未使用 Tailscale 时再检查同一 Wi‑Fi 下的局域网地址和 8823 端口"
                 }
             }
-            is MalformedURLException -> "\u684c\u9762\u5730\u5740\u683c\u5f0f\u4e0d\u6b63\u786e\uff0c\u8bf7\u4f7f\u7528 192.168.x.x:8823 \u6216 http://192.168.x.x:8823"
-            is SSLException -> "\u684c\u9762\u7aef HTTPS \u8fde\u63a5\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u8bc1\u4e66\u6216\u6539\u7528 HTTP \u5c40\u57df\u7f51\u5730\u5740"
+            is MalformedURLException -> "桌面地址格式不正确，请使用 100.x.x.x:8823、电脑名.tailnet.ts.net:8823 或 192.168.x.x:8823"
+            is SSLException -> "桌面端 HTTPS 连接失败，请检查证书，或先改用 HTTP 的 Tailscale / 局域网地址"
             is UnknownServiceException -> mapUnknownServiceException(exception)
-            is HttpStatusException -> "\u684c\u9762\u670d\u52a1\u8fd4\u56de\u9519\u8bef\uff08HTTP ${exception.statusCode}\uff09\uff1a${safeDetail(exception.message)}"
-            is SocketException -> "\u7f51\u7edc\u8fde\u63a5\u5f02\u5e38\uff1a${safeDetail(exception.message)}"
-            else -> "\u65e0\u6cd5\u8fde\u63a5\u684c\u9762\u540c\u6b65\u670d\u52a1\uff1a${formatException(exception)}"
+            is HttpStatusException -> "桌面服务返回错误（HTTP ${exception.statusCode}）：${safeDetail(exception.message)}"
+            is SocketException -> "网络连接异常：${safeDetail(exception.message)}"
+            else -> "无法连接桌面同步服务：${formatException(exception)}"
         }
     }
 
     private fun mapPushException(baseUrl: String, exception: Exception): String {
         return when (exception) {
-            is UnknownHostException -> "\u65e0\u6cd5\u89e3\u6790\u684c\u9762\u5730\u5740"
+            is UnknownHostException -> "无法解析桌面地址"
             is ConnectException -> {
                 if (isLoopbackHost(baseUrl)) {
-                    "\u624b\u673a\u7aef\u4e0d\u80fd\u4f7f\u7528 localhost \u6216 127.0.0.1"
+                    "手机端不能使用 localhost 或 127.0.0.1"
                 } else {
-                    "\u65e0\u6cd5\u8fde\u63a5\u5230\u684c\u9762\u670d\u52a1"
+                    "无法连接到桌面服务，请确认桌面同步程序仍在运行"
                 }
             }
-            is MalformedURLException -> "\u684c\u9762\u5730\u5740\u683c\u5f0f\u4e0d\u6b63\u786e"
-            is SSLException -> "\u684c\u9762\u7aef HTTPS \u8fde\u63a5\u5931\u8d25"
+            is MalformedURLException -> "桌面地址格式不正确"
+            is SSLException -> "桌面端 HTTPS 连接失败"
             is UnknownServiceException -> mapUnknownServiceException(exception)
-            is HttpStatusException -> "\u684c\u9762\u670d\u52a1\u8fd4\u56de\u9519\u8bef\uff08HTTP ${exception.statusCode}\uff09\uff1a${safeDetail(exception.message)}"
-            is SocketException -> "\u7f51\u7edc\u8fde\u63a5\u5f02\u5e38\uff1a${safeDetail(exception.message)}"
+            is HttpStatusException -> "桌面服务返回错误（HTTP ${exception.statusCode}）：${safeDetail(exception.message)}"
+            is SocketException -> "网络连接异常：${safeDetail(exception.message)}"
             else -> formatException(exception)
         }
     }
@@ -250,9 +250,9 @@ class DesktopAgentSyncCoordinator(
             detail.contains("CLEARTEXT", ignoreCase = true) ||
             detail.contains("cleartext", ignoreCase = true)
         ) {
-            "\u5f53\u524d\u7cfb\u7edf\u62d2\u7edd HTTP \u660e\u6587\u8bf7\u6c42\uff0c\u8bf7\u68c0\u67e5\u5730\u5740\u534f\u8bae\u6216\u5b89\u5168\u914d\u7f6e"
+            "当前系统拒绝 HTTP 明文请求，请检查地址协议或安全配置"
         } else {
-            "\u684c\u9762\u670d\u52a1\u8fde\u63a5\u65b9\u5f0f\u4e0d\u53d7\u652f\u6301\uff1a${safeDetail(detail)}"
+            "桌面服务连接方式不受支持：${safeDetail(detail)}"
         }
     }
 

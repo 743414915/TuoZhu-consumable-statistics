@@ -35,15 +35,7 @@ class SyncSettingsStore(context: Context) {
     }
 
     private fun normalizeBaseUrl(rawValue: String): String {
-        val trimmed = rawValue.trim().trimEnd('/')
-        if (trimmed.isEmpty()) {
-            return ""
-        }
-        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            trimmed
-        } else {
-            "http://$trimmed"
-        }
+        return normalizeDesktopBaseUrl(rawValue)
     }
 
     private companion object {

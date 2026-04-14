@@ -21,6 +21,11 @@ data class PrintJobConfirmationResult(
     val message: String,
 )
 
+data class RollDeletionResult(
+    val deleted: Boolean,
+    val message: String,
+)
+
 class FilamentRepository(
     private val dao: FilamentDao,
     private val runInTransaction: suspend (suspend () -> Unit) -> Unit,
@@ -41,6 +46,8 @@ class FilamentRepository(
     fun observeRecentEvents(limit: Int = 20): Flow<List<FilamentEventEntity>> = dao.observeRecentEvents(limit)
 
     fun observePendingPrintJobs(): Flow<List<PrintJobEntity>> = dao.observePendingPrintJobs()
+
+    fun observePrintHistory(limit: Int = 30): Flow<List<PrintJobEntity>> = dao.observePrintHistory(limit)
 
     fun observeSyncState(): Flow<SyncStateEntity?> = dao.observeSyncState()
 
@@ -137,6 +144,30 @@ class FilamentRepository(
 
     suspend fun setActiveRoll(rollId: Long) {
         dao.setActiveRollInternal(rollId, System.currentTimeMillis())
+    }
+
+    suspend fun deleteRoll(rollId: Long): RollDeletionResult {
+        val roll = dao.getRollById(rollId)
+            ?: return RollDeletionResult(false, "要删除的耗材卷不存在")
+        val now = System.currentTimeMillis()
+        var replacement: FilamentRollEntity? = null
+
+        inTransaction {
+            if (roll.isActive) {
+                replacement = dao.getNextActiveCandidate(rollId)
+            }
+            dao.deleteRoll(roll)
+            replacement?.let { next ->
+                dao.setActiveRollInternal(next.id, now)
+            }
+        }
+
+        val message = when {
+            replacement != null -> "已删除 ${roll.colorName} ${roll.name}，并切换到 ${replacement!!.colorName} ${replacement!!.name}"
+            roll.isActive -> "已删除 ${roll.colorName} ${roll.name}，当前没有活动卷"
+            else -> "已删除 ${roll.colorName} ${roll.name}"
+        }
+        return RollDeletionResult(true, message)
     }
 
     suspend fun pullSync(): SyncPullResult {
@@ -264,6 +295,16 @@ class FilamentRepository(
     }
 
     private suspend fun upsertDraftJobs(drafts: List<SyncDraftJob>) {
+        val incomingIds = drafts.map { it.externalJobId }.toSet()
+        val localDrafts = dao.getDraftPrintJobs()
+        if (incomingIds.isEmpty()) {
+            if (localDrafts.isNotEmpty()) {
+                dao.deleteAllDraftPrintJobs()
+            }
+        } else if (localDrafts.any { it.externalJobId !in incomingIds }) {
+            dao.deleteDraftPrintJobsNotIn(incomingIds.toList())
+        }
+
         drafts.forEach { draft ->
             val targetMaterial = SupportedMaterials.normalize(draft.targetMaterial)
             val existing = dao.getPrintJobByExternalId(draft.externalJobId)

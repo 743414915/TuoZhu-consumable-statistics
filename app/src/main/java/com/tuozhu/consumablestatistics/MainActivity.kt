@@ -8,7 +8,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.tuozhu.consumablestatistics.ui.ConsumableApp
+import com.tuozhu.consumablestatistics.ui.ConsumableWorkspaceApp
 import com.tuozhu.consumablestatistics.ui.ConsumableViewModel
 import com.tuozhu.consumablestatistics.ui.ConsumableViewModelFactory
 import com.tuozhu.consumablestatistics.ui.theme.TuoZhuConsumableStatisticsTheme
@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             TuoZhuConsumableStatisticsTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    ConsumableApp(viewModel = viewModel)
+                    ConsumableWorkspaceApp(viewModel = viewModel)
                 }
             }
         }
