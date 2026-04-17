@@ -47,6 +47,8 @@ class FilamentRepository(
 
     fun observePendingPrintJobs(): Flow<List<PrintJobEntity>> = dao.observePendingPrintJobs()
 
+    fun observeRecentPrintJobs(limit: Int = 40): Flow<List<PrintJobEntity>> = dao.observeRecentPrintJobs(limit)
+
     fun observePrintHistory(limit: Int = 30): Flow<List<PrintJobEntity>> = dao.observePrintHistory(limit)
 
     fun observeSyncState(): Flow<SyncStateEntity?> = dao.observeSyncState()
@@ -149,6 +151,10 @@ class FilamentRepository(
     suspend fun deleteRoll(rollId: Long): RollDeletionResult {
         val roll = dao.getRollById(rollId)
             ?: return RollDeletionResult(false, "要删除的耗材卷不存在")
+        if (roll.isArchivedRoll()) {
+            return RollDeletionResult(true, "该耗材卷已从当前库存移除")
+        }
+
         val now = System.currentTimeMillis()
         var replacement: FilamentRollEntity? = null
 
@@ -156,16 +162,22 @@ class FilamentRepository(
             if (roll.isActive) {
                 replacement = dao.getNextActiveCandidate(rollId)
             }
-            dao.deleteRoll(roll)
+            dao.updateRoll(
+                roll.copy(
+                    isActive = false,
+                    notes = archiveRollNotes(roll.notes),
+                    updatedAt = now,
+                ),
+            )
             replacement?.let { next ->
                 dao.setActiveRollInternal(next.id, now)
             }
         }
 
         val message = when {
-            replacement != null -> "已删除 ${roll.colorName} ${roll.name}，并切换到 ${replacement!!.colorName} ${replacement!!.name}"
-            roll.isActive -> "已删除 ${roll.colorName} ${roll.name}，当前没有活动卷"
-            else -> "已删除 ${roll.colorName} ${roll.name}"
+            replacement != null -> "已将 ${roll.colorName} ${roll.name} 移出当前库存，并切换到 ${replacement!!.colorName} ${replacement!!.name}"
+            roll.isActive -> "已将 ${roll.colorName} ${roll.name} 移出当前库存，当前没有活动卷"
+            else -> "已将 ${roll.colorName} ${roll.name} 移出当前库存"
         }
         return RollDeletionResult(true, message)
     }
@@ -216,10 +228,14 @@ class FilamentRepository(
         if (job.status == PrintJobStatus.CONFIRMED) {
             return PrintJobConfirmationResult(true, "该任务已确认，无需重复处理")
         }
+
         val rollId = targetRollId ?: job.rollId ?: dao.getActiveRoll()?.id
             ?: return PrintJobConfirmationResult(false, "请先设置活动耗材卷")
         val roll = dao.getRollById(rollId)
             ?: return PrintJobConfirmationResult(false, "目标耗材卷不存在")
+        if (roll.isArchivedRoll()) {
+            return PrintJobConfirmationResult(false, "目标耗材卷已删除，请重新选择活动卷")
+        }
 
         val expectedMaterial = SupportedMaterials.normalize(job.targetMaterial)
         val actualMaterial = SupportedMaterials.normalize(roll.material)
@@ -240,27 +256,28 @@ class FilamentRepository(
         }
 
         val updatedRemaining = currentRemaining - job.estimatedUsageGrams
+        var confirmedNow = false
         inTransaction {
-            dao.updateRoll(roll.copy(updatedAt = now))
-            dao.updatePrintJob(
-                job.copy(
-                    status = PrintJobStatus.CONFIRMED,
-                    rollId = rollId,
-                    confirmedAt = now,
-                ),
-            )
-            dao.insertEvent(
-                FilamentEventEntity(
-                    rollId = rollId,
-                    type = FilamentEventType.PRINT_USAGE,
-                    source = job.source,
-                    deltaGrams = updatedRemaining - currentRemaining,
-                    remainingAfterGrams = updatedRemaining,
-                    note = job.note.ifBlank { "确认打印任务" },
-                    externalJobId = job.externalJobId,
-                    createdAt = now,
-                ),
-            )
+            confirmedNow = dao.markPrintJobConfirmedIfDraft(jobId, rollId, now) == 1
+            if (confirmedNow) {
+                dao.updateRoll(roll.copy(updatedAt = now))
+                dao.insertEvent(
+                    FilamentEventEntity(
+                        rollId = rollId,
+                        type = FilamentEventType.PRINT_USAGE,
+                        source = job.source,
+                        deltaGrams = updatedRemaining - currentRemaining,
+                        remainingAfterGrams = updatedRemaining,
+                        note = job.note.ifBlank { "确认打印任务" },
+                        externalJobId = job.externalJobId,
+                        createdAt = now,
+                    ),
+                )
+            }
+        }
+
+        if (!confirmedNow) {
+            return PrintJobConfirmationResult(true, "该任务已确认，无需重复处理")
         }
 
         val pushResult = syncCoordinator.pushConfirmation(
@@ -340,5 +357,17 @@ class FilamentRepository(
 
     private suspend fun inTransaction(block: suspend () -> Unit) {
         runInTransaction(block)
+    }
+
+    private fun archiveRollNotes(notes: String): String {
+        if (notes.startsWith(ARCHIVED_ROLL_NOTE_PREFIX)) {
+            return notes
+        }
+        val trimmed = notes.trim()
+        return if (trimmed.isBlank()) {
+            ARCHIVED_ROLL_NOTE_PREFIX
+        } else {
+            "$ARCHIVED_ROLL_NOTE_PREFIX $trimmed"
+        }
     }
 }

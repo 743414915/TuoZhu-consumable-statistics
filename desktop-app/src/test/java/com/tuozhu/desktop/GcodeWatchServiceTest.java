@@ -74,4 +74,36 @@ public class GcodeWatchServiceTest {
             Assert.assertEquals(List.of(gcodePath.toAbsolutePath().normalize()), captured);
         }
     }
+
+    @Test
+    public void watcher_detectsSliceWhenRootAppearsAfterStart() throws Exception {
+        Path parent = Files.createTempDirectory("gcode-watch-late-root");
+        Path root = parent.resolve("bamboo_model");
+        List<Path> captured = new CopyOnWriteArrayList<>();
+        CountDownLatch latch = new CountDownLatch(1);
+
+        try (GcodeWatchService watcher = new GcodeWatchService(
+            List.of(root),
+            line -> { },
+            path -> {
+                captured.add(path);
+                latch.countDown();
+            }
+        )) {
+            watcher.start();
+            Thread.sleep(500L);
+
+            Path sliceDir = root.resolve("Mon_Apr_13").resolve("22_29_24#27000#66");
+            Files.createDirectories(sliceDir.resolve("Metadata"));
+            Path gcodePath = sliceDir.resolve(".27000.0.gcode");
+            Files.writeString(
+                gcodePath,
+                "; BambuStudio" + System.lineSeparator() + "; total filament weight [g] : 11.2" + System.lineSeparator(),
+                StandardCharsets.UTF_8
+            );
+
+            Assert.assertTrue("Timed out waiting for late-root watcher callback.", latch.await(10L, TimeUnit.SECONDS));
+            Assert.assertEquals(List.of(gcodePath.toAbsolutePath().normalize()), captured);
+        }
+    }
 }

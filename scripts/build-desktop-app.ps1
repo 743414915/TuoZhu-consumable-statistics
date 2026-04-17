@@ -55,7 +55,6 @@ try {
         --java-options "-Dfile.encoding=UTF-8"
 
     Copy-Item -LiteralPath (Join-Path $projectRoot "desktop-agent") -Destination (Join-Path $imageRoot "desktop-agent") -Recurse -Force
-    Copy-Item -LiteralPath (Join-Path $projectRoot "desktop-agent\HTTP_SERVER_USAGE.md") -Destination (Join-Path $imageRoot "HTTP_SERVER_USAGE.md") -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\DESKTOP_GUI_USAGE.md") -Destination (Join-Path $imageRoot "DESKTOP_GUI_USAGE.md") -Force
 } finally {
     Pop-Location

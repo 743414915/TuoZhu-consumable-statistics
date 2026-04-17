@@ -252,6 +252,7 @@ class FilamentRepositoryTest {
 
         assertTrue(firstConfirmation.confirmed)
         assertTrue(secondConfirmation.confirmed)
+        assertTrue(secondConfirmation.message.contains("无需重复处理"))
         assertEquals(PrintJobStatus.CONFIRMED, updatedJob.status)
         assertEquals(1, usageEvents.size)
         assertEquals(-120, usageEvents.single().deltaGrams)
@@ -360,6 +361,68 @@ class FilamentRepositoryTest {
     }
 
     @Test
+    fun observeRecentPrintJobs_keepsDraftAndConfirmedTimelineTogether() = runTest {
+        val dao = FakeFilamentDao()
+        val repository = FilamentRepository(
+            dao = dao,
+            runInTransaction = { block -> block() },
+            syncCoordinator = FakeSyncCoordinator(
+                pullProvider = {
+                    SyncPullResult(
+                        status = SyncConnectionStatus.SUCCESS,
+                        source = SyncSourceType.DESKTOP_AGENT,
+                        syncedAt = now,
+                        message = "ok",
+                        draftJobs = listOf(
+                            SyncDraftJob(
+                                externalJobId = "draft-new",
+                                source = SyncSourceType.DESKTOP_AGENT,
+                                modelName = "Fresh Draft",
+                                estimatedUsageGrams = 16,
+                                targetMaterial = "PETG Basic",
+                                note = "draft",
+                                createdAt = now + 1_000,
+                            ),
+                            SyncDraftJob(
+                                externalJobId = "draft-old",
+                                source = SyncSourceType.DESKTOP_AGENT,
+                                modelName = "Old Draft",
+                                estimatedUsageGrams = 12,
+                                targetMaterial = "PETG Basic",
+                                note = "old draft",
+                                createdAt = now - 5_000,
+                            ),
+                        ),
+                    )
+                },
+            ),
+        )
+
+        repository.addRoll(
+            brand = "Bambu Lab",
+            name = "History Roll",
+            material = "PETG Basic",
+            colorName = "Gray",
+            colorHex = "#666666",
+            initialWeightGrams = 1000,
+            remainingWeightGrams = 900,
+            lowStockThresholdGrams = 100,
+            notes = "",
+        )
+        repository.pullSync()
+        val oldDraftId = dao.printJobsSnapshot().first { it.externalJobId == "draft-old" }.id
+        repository.confirmPrintJob(oldDraftId)
+
+        val timeline = repository.observeRecentPrintJobs().first()
+
+        assertEquals(2, timeline.size)
+        assertEquals("draft-old", timeline.first().externalJobId)
+        assertEquals(PrintJobStatus.CONFIRMED, timeline.first().status)
+        assertEquals("draft-new", timeline.last().externalJobId)
+        assertEquals(PrintJobStatus.DRAFT, timeline.last().status)
+    }
+
+    @Test
     fun deleteRoll_reassignsActiveRoll_whenDeletingCurrentActive() = runTest {
         val dao = FakeFilamentDao()
         val repository = FilamentRepository(
@@ -397,14 +460,14 @@ class FilamentRepositoryTest {
 
         val remainingRolls = dao.rollsSnapshot()
         assertTrue(result.deleted)
-        assertEquals(1, remainingRolls.size)
-        assertEquals(backupRoll.id, remainingRolls.single().id)
-        assertTrue(remainingRolls.single().isActive)
+        assertEquals(2, remainingRolls.size)
+        assertTrue(remainingRolls.any { it.id == activeRollId && it.isArchivedRoll() })
+        assertTrue(remainingRolls.any { it.id == backupRoll.id && it.isActive })
         assertEquals(backupRoll.id, dao.getActiveRoll()?.id)
     }
 
     @Test
-    fun deleteRoll_keepsPrintHistoryButClearsDeletedRollReference() = runTest {
+    fun deleteRoll_keepsPrintHistoryAndRetainsArchivedRollReference() = runTest {
         val dao = FakeFilamentDao()
         val repository = FilamentRepository(
             dao = dao,
@@ -467,11 +530,12 @@ class FilamentRepositoryTest {
         val remainingRolls = dao.rollsSnapshot()
         val printHistory = repository.observePrintHistory().first()
         assertTrue(result.deleted)
-        assertEquals(1, remainingRolls.size)
+        assertEquals(2, remainingRolls.size)
         assertEquals(1, printHistory.size)
         assertEquals("history-job", printHistory.single().externalJobId)
-        assertEquals(null, printHistory.single().rollId)
-        assertTrue(dao.eventsSnapshot().none { it.rollId == historyRoll.id })
+        assertEquals(historyRoll.id, printHistory.single().rollId)
+        assertTrue(remainingRolls.first { it.id == historyRoll.id }.isArchivedRoll())
+        assertTrue(dao.eventsSnapshot().any { it.rollId == historyRoll.id })
     }
 
     @Test
@@ -498,9 +562,10 @@ class FilamentRepositoryTest {
         val result = repository.deleteRoll(onlyRollId)
 
         assertTrue(result.deleted)
-        assertTrue(dao.rollsSnapshot().isEmpty())
+        assertEquals(1, dao.rollsSnapshot().size)
+        assertTrue(dao.rollsSnapshot().single().isArchivedRoll())
         assertEquals(null, dao.getActiveRoll())
-        assertTrue(dao.eventsSnapshot().isEmpty())
+        assertFalse(dao.eventsSnapshot().isEmpty())
     }
 }
 
@@ -530,6 +595,7 @@ private class FakeFilamentDao : FilamentDao {
     private val rollsFlow = MutableStateFlow<List<FilamentRollEntity>>(emptyList())
     private val eventsFlow = MutableStateFlow<List<FilamentEventEntity>>(emptyList())
     private val pendingJobsFlow = MutableStateFlow<List<PrintJobEntity>>(emptyList())
+    private val recentPrintJobsFlow = MutableStateFlow<List<PrintJobEntity>>(emptyList())
     private val printHistoryFlow = MutableStateFlow<List<PrintJobEntity>>(emptyList())
     private val syncStateFlow = MutableStateFlow<SyncStateEntity?>(null)
 
@@ -542,6 +608,8 @@ private class FakeFilamentDao : FilamentDao {
     override fun observeRecentEvents(limit: Int): Flow<List<FilamentEventEntity>> = eventsFlow
 
     override fun observePendingPrintJobs(): Flow<List<PrintJobEntity>> = pendingJobsFlow
+
+    override fun observeRecentPrintJobs(limit: Int): Flow<List<PrintJobEntity>> = recentPrintJobsFlow
 
     override fun observePrintHistory(limit: Int): Flow<List<PrintJobEntity>> = printHistoryFlow
 
@@ -565,21 +633,28 @@ private class FakeFilamentDao : FilamentDao {
 
     override suspend fun getNextActiveCandidate(excludedRollId: Long): FilamentRollEntity? {
         return rolls
-            .filter { it.id != excludedRollId }
+            .filter { it.id != excludedRollId && !it.isArchivedRoll() }
             .sortedWith(compareByDescending<FilamentRollEntity> { it.updatedAt }.thenByDescending { it.id })
             .firstOrNull()
     }
 
-    override suspend fun getActiveRollCount(): Int = rolls.count { it.isActive }
+    override suspend fun getActiveRollCount(): Int = rolls.count { it.isActive && !it.isArchivedRoll() }
 
-    override suspend fun getActiveRoll(): FilamentRollEntity? = rolls.firstOrNull { it.isActive }
+    override suspend fun getActiveRoll(): FilamentRollEntity? = rolls.firstOrNull { it.isActive && !it.isArchivedRoll() }
 
     override suspend fun sumDeltaAfter(rollId: Long, afterTime: Long): Int {
         return events.filter { it.rollId == rollId && it.createdAt > afterTime }.sumOf { it.deltaGrams }
     }
 
     override suspend fun setActiveRollInternal(rollId: Long, updatedAt: Long) {
-        replaceRolls(rolls.map { roll -> roll.copy(isActive = roll.id == rollId, updatedAt = updatedAt) })
+        replaceRolls(
+            rolls.map { roll ->
+                roll.copy(
+                    isActive = roll.id == rollId && !roll.isArchivedRoll(),
+                    updatedAt = updatedAt,
+                )
+            },
+        )
     }
 
     override suspend fun insertRoll(roll: FilamentRollEntity): Long {
@@ -600,6 +675,8 @@ private class FakeFilamentDao : FilamentDao {
         val assigned = if (job.id == 0L) job.copy(id = nextJobId++) else job
         printJobs += assigned
         refreshPendingJobs()
+        refreshRecentPrintJobs()
+        refreshPrintHistory()
         return assigned.id
     }
 
@@ -609,6 +686,27 @@ private class FakeFilamentDao : FilamentDao {
 
     override suspend fun updateRoll(roll: FilamentRollEntity) {
         replaceRolls(rolls.map { if (it.id == roll.id) roll else it })
+    }
+
+    override suspend fun markPrintJobConfirmedIfDraft(jobId: Long, rollId: Long, confirmedAt: Long): Int {
+        val existing = printJobs.firstOrNull { it.id == jobId } ?: return 0
+        if (existing.status != PrintJobStatus.DRAFT) {
+            return 0
+        }
+        replacePrintJobs(
+            printJobs.map { job ->
+                if (job.id == jobId) {
+                    job.copy(
+                        status = PrintJobStatus.CONFIRMED,
+                        rollId = rollId,
+                        confirmedAt = confirmedAt,
+                    )
+                } else {
+                    job
+                }
+            },
+        )
+        return 1
     }
 
     override suspend fun deleteRoll(roll: FilamentRollEntity) {
@@ -657,6 +755,7 @@ private class FakeFilamentDao : FilamentDao {
         printJobs.clear()
         printJobs.addAll(newJobs)
         refreshPendingJobs()
+        refreshRecentPrintJobs()
         refreshPrintHistory()
     }
 
@@ -682,6 +781,14 @@ private class FakeFilamentDao : FilamentDao {
                 compareByDescending<PrintJobEntity> { it.createdAt }
                     .thenByDescending { it.id },
             )
+    }
+
+    private fun refreshRecentPrintJobs() {
+        recentPrintJobsFlow.value = printJobs.sortedWith(
+            compareByDescending<PrintJobEntity> { it.confirmedAt ?: it.createdAt }
+                .thenByDescending { it.createdAt }
+                .thenByDescending { it.id },
+        )
     }
 
     private fun refreshPrintHistory() {

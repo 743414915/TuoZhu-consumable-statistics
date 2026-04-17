@@ -82,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tuozhu.consumablestatistics.data.PrintJobStatus
 import com.tuozhu.consumablestatistics.data.SyncConnectionStatus
 import com.tuozhu.consumablestatistics.data.SyncSourceType
 import com.tuozhu.consumablestatistics.domain.SupportedMaterials
@@ -693,12 +694,13 @@ private fun HistoryPage(
     modifier: Modifier = Modifier,
 ) {
     PageColumn(modifier = modifier) {
-        if (state.printHistory.isNotEmpty()) {
-            item { PrintHistorySection(history = state.printHistory, expandedInitially = true) }
+        if (state.recentPrintTasks.isNotEmpty()) {
+            item { PrintTaskHistorySummaryCard(summary = state.printTaskSummary) }
+            item { PrintTaskTimelineSection(tasks = state.recentPrintTasks, expandedInitially = true) }
         }
         if (state.recentEvents.isNotEmpty()) {
             item { RecentEventSection(events = state.recentEvents) }
-        } else if (state.printHistory.isEmpty()) {
+        } else if (state.recentPrintTasks.isEmpty()) {
             item { HistoryEmptyCard() }
         }
     }
@@ -892,6 +894,13 @@ private fun SyncStatusSection(
     var endpointInput by rememberSaveable { mutableStateOf(syncStatus.desktopBaseUrl) }
     val normalizedInput = normalizeDesktopBaseUrl(endpointInput)
     val hasPendingChanges = normalizedInput != syncStatus.desktopBaseUrl
+    val syncBusy = syncStatus.isPulling || syncStatus.isDiscoveringLan
+    val pullButtonLabel = when {
+        syncStatus.isPulling -> "正在拉取桌面记录..."
+        hasPendingChanges -> "先保存地址再拉取"
+        syncStatus.isConfigured -> "立即拉取桌面打印记录"
+        else -> "先填写桌面地址"
+    }
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val rawValue = result.contents
         if (rawValue.isNullOrBlank()) {
@@ -1076,8 +1085,64 @@ private fun SyncStatusSection(
                     containerColor = if (syncStatus.pendingCount > 0) ClayOrange.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = if (syncStatus.pendingCount > 0) ClayOrange else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = { settingsExpanded = !settingsExpanded }) {
-                    Text(if (settingsExpanded) "收起设置" else if (syncStatus.isConfigured) "编辑地址" else "填写地址")
+            }
+            Button(
+                onClick = {
+                    if (hasPendingChanges || !syncStatus.isConfigured) {
+                        settingsExpanded = true
+                    } else {
+                        onPullSync()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !syncBusy,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = ClayOrange,
+                    contentColor = Color.White,
+                ),
+            ) {
+                Icon(Icons.Outlined.Sync, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(pullButtonLabel)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        if (activity == null) {
+                            Toast.makeText(context, "当前页面无法启动扫码器", Toast.LENGTH_SHORT).show()
+                            return@OutlinedButton
+                        }
+                        val permissionGranted = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.CAMERA,
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (permissionGranted) {
+                            scanLauncher.launch(buildQrScanOptions())
+                        } else {
+                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = !syncBusy,
+                ) {
+                    Text("扫码配对")
+                }
+                OutlinedButton(
+                    onClick = { settingsExpanded = !settingsExpanded },
+                    modifier = Modifier.weight(1f),
+                    border = BorderStroke(1.dp, ClayOrange.copy(alpha = 0.35f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ClayOrange),
+                ) {
+                    Icon(
+                        imageVector = if (settingsExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (settingsExpanded) "收起地址设置" else if (syncStatus.isConfigured) "编辑地址设置" else "填写桌面地址")
                 }
             }
             AnimatedVisibility(visible = settingsExpanded) {
@@ -1094,10 +1159,11 @@ private fun SyncStatusSection(
                         placeholder = { Text("例如 100.x.x.x:8823、电脑名.tailnet.ts.net:8823 或 192.168.x.x:8823") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
+                        enabled = !syncBusy,
                     )
                     if (hasPendingChanges) {
                         Text(
-                            text = "地址有未保存改动",
+                            text = "地址有未保存改动。立即拉取仍会使用上一次已保存的地址。",
                             style = MaterialTheme.typography.bodySmall,
                             color = ClayOrange,
                         )
@@ -1121,46 +1187,21 @@ private fun SyncStatusSection(
                     ) {
                         Button(
                             modifier = Modifier.weight(1f),
-                            onClick = { onSaveEndpoint(endpointInput) },
+                            onClick = {
+                                onSaveEndpoint(endpointInput)
+                                if (normalizedInput.isNotBlank()) {
+                                    settingsExpanded = false
+                                }
+                            },
+                            enabled = !syncBusy,
                             colors = ButtonDefaults.buttonColors(containerColor = ClayOrange, contentColor = Color.White),
                         ) {
                             Text(if (normalizedInput.isBlank()) "清空地址" else "保存地址")
                         }
                         OutlinedButton(
                             modifier = Modifier.weight(1f),
-                            onClick = onPullSync,
-                        ) {
-                            Text("拉取桌面打印记录")
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                if (activity == null) {
-                                    Toast.makeText(context, "当前页面无法启动扫码器", Toast.LENGTH_SHORT).show()
-                                    return@OutlinedButton
-                                }
-                                val permissionGranted = ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.CAMERA,
-                                ) == PackageManager.PERMISSION_GRANTED
-                                if (permissionGranted) {
-                                    scanLauncher.launch(buildQrScanOptions())
-                                } else {
-                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("扫码配对")
-                        }
-                        OutlinedButton(
                             onClick = onDiscoverLan,
-                            enabled = !syncStatus.isDiscoveringLan,
-                            modifier = Modifier.weight(1f),
+                            enabled = !syncBusy,
                         ) {
                             Text(if (syncStatus.isDiscoveringLan) "扫描同一 Wi‑Fi..." else "扫描同一 Wi‑Fi")
                         }
@@ -1222,6 +1263,7 @@ private fun PendingPrintJobCard(
     val activeMaterial = SupportedMaterials.normalize(activeRoll?.material)
     val materialMatches = requiredMaterial == null || activeMaterial == requiredMaterial
     val actionHint = when {
+        job.isConfirming -> "正在提交确认，请稍候"
         activeRoll == null -> "尚未选择活动卷"
         !materialMatches -> "当前活动卷为 ${activeRoll.material}，请先切换到 $requiredMaterial"
         else -> "将作用于 ${activeRoll.displayName}"
@@ -1279,7 +1321,7 @@ private fun PendingPrintJobCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Button(
-                enabled = activeRoll != null && materialMatches,
+                enabled = activeRoll != null && materialMatches && !job.isConfirming,
                 onClick = onConfirm,
                 colors = ButtonDefaults.buttonColors(containerColor = ClayOrange, contentColor = Color.White),
             ) {
@@ -1793,6 +1835,194 @@ private fun PrintHistorySection(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PrintTaskHistorySummaryCard(summary: PrintTaskHistorySummaryUiModel) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("桌面捕获摘要", style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = "这里集中看最近自动捕获到的打印任务，待确认和已确认会放在同一条时间线里。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                HistoryMetricCard(
+                    modifier = Modifier.weight(1f),
+                    label = "待确认",
+                    value = "${summary.pendingCount} 条",
+                    accent = ClayOrange,
+                )
+                HistoryMetricCard(
+                    modifier = Modifier.weight(1f),
+                    label = "已确认",
+                    value = "${summary.confirmedCount} 条",
+                    accent = MossInk,
+                )
+                HistoryMetricCard(
+                    modifier = Modifier.weight(1f),
+                    label = "最近消耗",
+                    value = "${summary.confirmedUsageGrams}g",
+                    accent = SuccessMint,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryMetricCard(
+    modifier: Modifier = Modifier,
+    label: String,
+    value: String,
+    accent: Color,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(22.dp),
+        color = accent.copy(alpha = 0.12f),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = accent)
+            Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+private fun PrintTaskTimelineSection(
+    tasks: List<PrintTaskTimelineUiModel>,
+    expandedInitially: Boolean = false,
+) {
+    var expanded by rememberSaveable { mutableStateOf(expandedInitially) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.History, contentDescription = null, tint = ClayOrange)
+                    Column {
+                        Text("打印任务时间线", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            text = "最近 ${tasks.size} 条桌面捕获任务",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "收起" else "查看")
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    tasks.forEachIndexed { index, task ->
+                        if (index > 0) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                        }
+                        PrintTaskTimelineItem(task = task)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PrintTaskTimelineItem(task: PrintTaskTimelineUiModel) {
+    val statusColor = if (task.status == PrintJobStatus.CONFIRMED) MossInk else ClayOrange
+    val statusContainer = if (task.status == PrintJobStatus.CONFIRMED) {
+        SuccessMint.copy(alpha = 0.14f)
+    } else {
+        ClayOrange.copy(alpha = 0.14f)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(task.modelName, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "${task.updatedAtPrefix} ${task.updatedAtLabel} | ${task.sourceLabel}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            StatusPill(
+                text = task.statusLabel,
+                containerColor = statusContainer,
+                contentColor = statusColor,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusPill(
+                text = "${task.estimatedUsageGrams}g",
+                containerColor = ClayOrange.copy(alpha = 0.14f),
+                contentColor = ClayOrange,
+            )
+            task.targetMaterial?.takeIf { it.isNotBlank() }?.let { material ->
+                StatusPill(
+                    text = material,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+        }
+        task.rollLabel?.let { rollLabel ->
+            Text(
+                text = "关联耗材卷：$rollLabel",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(
+            text = "捕获时间 ${task.createdAtLabel} | 任务 ID ${task.externalJobId}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (task.note.isNotBlank()) {
+            Text(
+                text = task.note,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

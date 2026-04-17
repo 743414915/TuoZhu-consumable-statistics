@@ -1,36 +1,78 @@
 # 拓竹耗材管家
 
-面向没有 AMS 的拓竹 A1 mini 用户，用手动称重方式管理每卷耗材剩余克重的 Android 应用。
+面向 `Bambu Lab A1 mini + 无 AMS` 场景的耗材管理项目。当前交付由两部分组成：
 
-## MVP 功能
+- `app/`：Android 手机端，用于管理耗材卷、确认打印任务、查看历史记录。
+- `desktop-app/`：Windows 桌面端 GUI，用于监听 Bambu Studio 切片缓存、解析 `.gcode`、向手机端提供内置同步服务。
 
-- 新增耗材卷，记录品牌、材料、颜色、满卷克重和当前剩余克重
-- 手动登记每次打印消耗的克重
-- 通过称重重新校准某卷耗材的剩余克重
-- 首页查看所有耗材卷的剩余状态、低库存提醒和最近操作记录
-- 本地离线存储，不依赖登录或云端
+桌面端当前主方案是：
 
-## 技术栈
+1. `desktop-app` 启动桌面 GUI。
+2. GUI 内置 HTTP 服务，提供 `/health`、`/api/sync/pull`、`/api/sync/confirm`。
+3. GUI 调用 `desktop-agent/run-sync-agent.ps1` 解析最近切片的 `.gcode`。
+4. 解析结果写入 `desktop-agent/outbox` 和 `desktop-agent/state`。
+5. Android 端拉取草稿任务，用户确认后再扣减当前耗材卷。
 
-- Kotlin
-- Jetpack Compose + Material 3
-- Room
-- ViewModel + StateFlow
+旧的“单独启动 PowerShell HTTP 服务”方案已归档：
 
-## 当前已知限制
+- `docs/archive/`
+- `desktop-agent/legacy/`
 
-- 当前仓库已经内置项目级 `.tools` 构建环境，可通过 `powershell -ExecutionPolicy Bypass -File .\scripts\build-debug.ps1` 重新打包
-- `gradle-wrapper.jar` 仍未补入，因此优先使用项目内脚本而不是 `gradlew`
-- 首版暂未加入导出、备份、打印任务导入、耗材品牌预设等增强能力
+## 当前能力
 
-## APK 输出
+- 耗材卷管理：新增、编辑、切换活动卷、归档已用完卷。
+- 材料范围：`PLA Basic`、`PETG Basic`、`PLA Silk`。
+- Android 端支持手动同步、扫码配对、待确认打印任务、打印历史记录。
+- 桌面端支持实时监听 Bambu Studio 缓存目录，检测最近切片并自动生成同步草稿。
+- 桌面端推荐地址优先展示 Tailscale，其次展示局域网地址。
 
-- 调试 APK: `app/build/outputs/apk/debug/app-debug.apk`
-- 可分发副本: `dist/tuozhu-consumable-manager-debug.apk`
+## 代码入口
 
-## 下一步建议
+- Android 应用入口：`app/src/main/java/com/tuozhu/consumablestatistics/MainActivity.kt`
+- Android 同步实现：`app/src/main/java/com/tuozhu/consumablestatistics/sync/`
+- 桌面 GUI 入口：`desktop-app/src/main/java/com/tuozhu/desktop/DesktopSyncApp.java`
+- 桌面内置服务：`desktop-app/src/main/java/com/tuozhu/desktop/EmbeddedSyncService.java`
+- G-code 监听：`desktop-app/src/main/java/com/tuozhu/desktop/GcodeWatchService.java`
+- G-code 解析引擎：`desktop-agent/run-sync-agent.ps1`
 
-1. 补齐 Gradle Wrapper 与本机 Android 构建环境
-2. 增加删除或归档耗材卷、筛选和搜索
-3. 加入 CSV/JSON 备份恢复
-4. 后续可扩展到按打印任务估算耗材消耗
+## 仓库结构
+
+```text
+app/                 Android 客户端
+desktop-app/         Windows 桌面 GUI 与内置 HTTP 服务
+desktop-agent/       G-code 解析、状态文件、同步草稿引擎
+docs/                当前方案文档
+docs/archive/        已归档的旧方案文档
+scripts/             使用项目内 .tools 的构建脚本
+```
+
+## 构建方式
+
+本仓库优先使用项目内的 `.tools`，避免修改电脑系统环境。
+
+- Android 调试构建：`powershell -ExecutionPolicy Bypass -File .\scripts\build-debug.ps1`
+- 桌面端打包：`powershell -ExecutionPolicy Bypass -File .\scripts\build-desktop-app.ps1`
+
+注意：
+
+- `gradle/wrapper/` 当前只有 `gradle-wrapper.properties`，缺少 `gradle-wrapper.jar`。
+- 因此默认不要依赖 `gradlew`，优先使用 `scripts/` 下脚本。
+
+## 运行桌面端
+
+桌面打包输出目录：
+
+- `dist/desktop/TuoZhuDesktopSync/`
+
+直接运行：
+
+- `dist/desktop/TuoZhuDesktopSync/TuoZhuDesktopSync.exe`
+
+如果换一台 Windows 电脑运行，复制整个 `TuoZhuDesktopSync` 目录即可，不要只复制 `.exe`。目录内的 `runtime/`、`app/`、`desktop-agent/` 都是必需的。
+
+## 推荐文档
+
+- `docs/DESKTOP_GUI_USAGE.md`：桌面端日常使用
+- `docs/ARCHITECTURE.md`：当前架构与代码职责
+- `docs/DESKTOP_SYNC_PROTOCOL.md`：桌面和 Android 的同步协议
+- `desktop-agent/README.md`：同步引擎目录说明

@@ -31,6 +31,17 @@ final class GcodeWatchService implements AutoCloseable {
     private static final int REQUIRED_STABLE_PASSES = 2;
     private static final int MAX_SCAN_DEPTH = 6;
 
+    enum WatchLevel {
+        IDLE,
+        INFO,
+        SUCCESS,
+        WARNING,
+        ERROR,
+    }
+
+    record WatchStatus(WatchLevel level, String summary, String detail) {
+    }
+
     private final List<Path> roots;
     private final Consumer<String> logger;
     private final Consumer<Path> stableFileConsumer;
@@ -45,6 +56,11 @@ final class GcodeWatchService implements AutoCloseable {
 
     private volatile WatchService watchService;
     private volatile boolean running;
+    private volatile WatchStatus currentStatus = new WatchStatus(
+        WatchLevel.IDLE,
+        "未启用",
+        "桌面监听线程尚未启动"
+    );
 
     GcodeWatchService(List<Path> roots, Consumer<String> logger, Consumer<Path> stableFileConsumer) {
         this.roots = normalizeRoots(roots);
@@ -54,14 +70,20 @@ final class GcodeWatchService implements AutoCloseable {
         this.scheduler = Executors.newSingleThreadScheduledExecutor(namedThreadFactory("gcode-watch-probe"));
     }
 
+    WatchStatus currentStatus() {
+        return currentStatus;
+    }
+
     void start() throws IOException {
         if (running) {
             return;
         }
         watchService = Paths.get(".").getFileSystem().newWatchService();
         running = true;
+        updateStatus(WatchLevel.INFO, "初始化中", "正在准备 G-code 监听目录");
 
         if (roots.isEmpty()) {
+            updateStatus(WatchLevel.WARNING, "未启用", "尚未配置 G-code 监听目录");
             log("[监听] 未配置 G-code 监听目录。");
             return;
         }
@@ -71,6 +93,7 @@ final class GcodeWatchService implements AutoCloseable {
         }
 
         watchExecutor.execute(this::watchLoop);
+        refreshIdleStatus();
         log("[监听] 已启动 G-code 自动监听，共 " + roots.size() + " 个目录。");
     }
 
@@ -95,12 +118,14 @@ final class GcodeWatchService implements AutoCloseable {
         }
         scheduler.shutdownNow();
         watchExecutor.shutdownNow();
+        updateStatus(WatchLevel.IDLE, "未启用", "桌面监听线程已停止");
     }
 
     private void registerRoot(Path root) {
         Path existing = nearestExistingAncestor(root);
         if (existing == null) {
             pendingRoots.add(root);
+            updateStatus(WatchLevel.WARNING, "等待目录", "等待目录出现：" + root);
             log("[监听] 等待目录出现：" + root);
             return;
         }
@@ -109,13 +134,16 @@ final class GcodeWatchService implements AutoCloseable {
             if (Files.exists(root) && Files.isDirectory(root)) {
                 pendingRoots.remove(root);
                 registerRecursively(root);
+                updateStatus(WatchLevel.INFO, "启动回补", "正在扫描最近切片：" + root);
                 scheduleDirectoryScan(root, "启动回补");
             } else {
                 pendingRoots.add(root);
                 registerDirectorySafely(existing);
+                updateStatus(WatchLevel.WARNING, "等待缓存目录", "等待缓存目录出现：" + root);
                 log("[监听] 等待缓存目录出现：" + root);
             }
         } catch (IOException exception) {
+            updateStatus(WatchLevel.ERROR, "监听失败", root + "：" + exception.getMessage());
             log("[监听] 监听目录失败：" + root + "，" + exception.getMessage());
         }
     }
@@ -172,6 +200,7 @@ final class GcodeWatchService implements AutoCloseable {
                 try {
                     registerRecursively(changedPath);
                 } catch (IOException exception) {
+                    updateStatus(WatchLevel.ERROR, "Metadata 目录注册失败", exception.getMessage());
                     log("[监听] 注册 Metadata 目录失败：" + changedPath + "，" + exception.getMessage());
                 }
             }
@@ -183,6 +212,7 @@ final class GcodeWatchService implements AutoCloseable {
                 try {
                     registerRecursively(changedPath);
                 } catch (IOException exception) {
+                    updateStatus(WatchLevel.ERROR, "目录注册失败", exception.getMessage());
                     log("[监听] 注册新目录失败：" + changedPath + "，" + exception.getMessage());
                 }
             }
@@ -203,12 +233,15 @@ final class GcodeWatchService implements AutoCloseable {
             pendingRoots.remove(root);
             try {
                 registerRecursively(root);
+                updateStatus(WatchLevel.INFO, "目录已接入", "正在回补扫描：" + root);
                 scheduleDirectoryScan(root, "目录出现");
                 log("[监听] 已接入缓存目录：" + root);
             } catch (IOException exception) {
+                updateStatus(WatchLevel.ERROR, "目录接入失败", exception.getMessage());
                 log("[监听] 接入缓存目录失败：" + root + "，" + exception.getMessage());
             }
         }
+        refreshIdleStatus();
     }
 
     private void registerRecursively(Path root) throws IOException {
@@ -237,6 +270,7 @@ final class GcodeWatchService implements AutoCloseable {
             watchedDirectories.put(key, directory);
         } catch (IOException exception) {
             registeredDirectories.remove(directory);
+            updateStatus(WatchLevel.ERROR, "目录注册失败", exception.getMessage());
             log("[监听] 注册目录失败：" + directory + "，" + exception.getMessage());
         }
     }
@@ -245,11 +279,13 @@ final class GcodeWatchService implements AutoCloseable {
         if (!running || path == null) {
             return;
         }
+        updateStatus(WatchLevel.INFO, "回补扫描中", reason + "：" + path);
         scheduler.schedule(() -> scanDirectory(path, reason), INITIAL_SCAN_DELAY_MS, TimeUnit.MILLISECONDS);
     }
 
     private void scanDirectory(Path path, String reason) {
         if (!running || path == null || !Files.exists(path)) {
+            refreshIdleStatus();
             return;
         }
 
@@ -259,17 +295,25 @@ final class GcodeWatchService implements AutoCloseable {
         }
 
         if (!Files.isDirectory(path)) {
+            refreshIdleStatus();
             return;
         }
 
         try (Stream<Path> stream = Files.walk(path, MAX_SCAN_DEPTH)) {
             stream
-                .filter(Files::isRegularFile)
-                .filter(this::isGcodeCandidate)
                 .map(candidate -> candidate.toAbsolutePath().normalize())
-                .forEach(candidate -> scheduleProbe(candidate, reason));
+                .forEach(candidate -> {
+                    if (Files.isDirectory(candidate)) {
+                        registerDirectorySafely(candidate);
+                    } else if (Files.isRegularFile(candidate) && isGcodeCandidate(candidate)) {
+                        scheduleProbe(candidate, reason);
+                    }
+                });
         } catch (IOException exception) {
+            updateStatus(WatchLevel.ERROR, "扫描失败", exception.getMessage());
             log("[监听] 扫描目录失败：" + path + "，" + exception.getMessage());
+        } finally {
+            refreshIdleStatus();
         }
     }
 
@@ -282,6 +326,7 @@ final class GcodeWatchService implements AutoCloseable {
         if (previous != null) {
             previous.cancel(false);
         }
+        updateStatus(WatchLevel.INFO, "稳定性判定中", shortLabel(normalized) + "，原因：" + reason);
         ScheduledFuture<?> future = scheduler.schedule(
             () -> probeCandidate(normalized, reason),
             STABILITY_DELAY_MS,
@@ -294,6 +339,7 @@ final class GcodeWatchService implements AutoCloseable {
         pendingProbes.remove(file);
         if (!running || !Files.exists(file) || !Files.isRegularFile(file)) {
             candidateStates.remove(file);
+            refreshIdleStatus();
             return;
         }
 
@@ -307,7 +353,8 @@ final class GcodeWatchService implements AutoCloseable {
             CandidateState previous = candidateStates.get(file);
             if (previous == null || !previous.fingerprint().equals(fingerprint)) {
                 candidateStates.put(file, new CandidateState(fingerprint, 1));
-                log("[监听] 正在稳定文件：" + file.getFileName() + "（" + reason + "）");
+                updateStatus(WatchLevel.INFO, "稳定性判定中", shortLabel(file) + "，等待再次确认");
+                log("[监听] 正在稳定文件：" + file.getFileName() + "，" + reason + "。");
                 scheduleProbe(file, "继续稳定");
                 return;
             }
@@ -315,6 +362,7 @@ final class GcodeWatchService implements AutoCloseable {
             int stablePasses = previous.stablePasses() + 1;
             if (stablePasses < REQUIRED_STABLE_PASSES) {
                 candidateStates.put(file, new CandidateState(fingerprint, stablePasses));
+                updateStatus(WatchLevel.INFO, "稳定性判定中", shortLabel(file) + "，已通过 " + stablePasses + " 次检查");
                 scheduleProbe(file, "继续稳定");
                 return;
             }
@@ -323,15 +371,30 @@ final class GcodeWatchService implements AutoCloseable {
             String processedFingerprint = fingerprint.toToken();
             String lastProcessed = processedFingerprints.put(file, processedFingerprint);
             if (processedFingerprint.equals(lastProcessed)) {
+                refreshIdleStatus();
                 return;
             }
 
+            updateStatus(WatchLevel.SUCCESS, "已捕获切片", shortLabel(file));
             log("[监听] 文件稳定，准备同步：" + file);
             stableFileConsumer.accept(file);
         } catch (IOException exception) {
+            updateStatus(WatchLevel.ERROR, "读取失败", shortLabel(file) + "：" + exception.getMessage());
             log("[监听] 读取文件状态失败：" + file + "，" + exception.getMessage());
             scheduleProbe(file, "读取失败后重试");
         }
+    }
+
+    private void refreshIdleStatus() {
+        if (!running) {
+            return;
+        }
+        if (!pendingRoots.isEmpty()) {
+            Path waitingRoot = pendingRoots.iterator().next();
+            updateStatus(WatchLevel.WARNING, "等待目录", "等待目录出现：" + waitingRoot);
+            return;
+        }
+        updateStatus(WatchLevel.SUCCESS, "监听中", "正在等待新的切片文件");
     }
 
     private boolean isMetadataPath(Path path) {
@@ -353,6 +416,15 @@ final class GcodeWatchService implements AutoCloseable {
             current = current.getParent();
         }
         return null;
+    }
+
+    private void updateStatus(WatchLevel level, String summary, String detail) {
+        currentStatus = new WatchStatus(level, summary, detail);
+    }
+
+    private String shortLabel(Path path) {
+        Path fileName = path.getFileName();
+        return fileName == null ? path.toString() : fileName.toString();
     }
 
     private void log(String message) {

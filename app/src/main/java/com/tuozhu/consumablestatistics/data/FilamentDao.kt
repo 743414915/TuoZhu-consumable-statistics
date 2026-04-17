@@ -22,6 +22,9 @@ interface FilamentDao {
     @Query("SELECT * FROM print_jobs WHERE status = 'DRAFT' ORDER BY createdAt DESC, id DESC")
     fun observePendingPrintJobs(): Flow<List<PrintJobEntity>>
 
+    @Query("SELECT * FROM print_jobs ORDER BY COALESCE(confirmedAt, createdAt) DESC, createdAt DESC, id DESC LIMIT :limit")
+    fun observeRecentPrintJobs(limit: Int = 40): Flow<List<PrintJobEntity>>
+
     @Query("SELECT * FROM print_jobs WHERE status = 'CONFIRMED' ORDER BY confirmedAt DESC, createdAt DESC, id DESC LIMIT :limit")
     fun observePrintHistory(limit: Int = 30): Flow<List<PrintJobEntity>>
 
@@ -40,20 +43,23 @@ interface FilamentDao {
     @Query("SELECT * FROM filament_rolls WHERE id = :rollId LIMIT 1")
     suspend fun getRollById(rollId: Long): FilamentRollEntity?
 
-    @Query("SELECT * FROM filament_rolls WHERE id != :excludedRollId ORDER BY updatedAt DESC, id DESC LIMIT 1")
+    @Query("SELECT * FROM filament_rolls WHERE id != :excludedRollId AND notes NOT LIKE '[[ARCHIVED]]%' ORDER BY updatedAt DESC, id DESC LIMIT 1")
     suspend fun getNextActiveCandidate(excludedRollId: Long): FilamentRollEntity?
 
-    @Query("SELECT COUNT(*) FROM filament_rolls WHERE isActive = 1")
+    @Query("SELECT COUNT(*) FROM filament_rolls WHERE isActive = 1 AND notes NOT LIKE '[[ARCHIVED]]%'")
     suspend fun getActiveRollCount(): Int
 
-    @Query("SELECT * FROM filament_rolls WHERE isActive = 1 LIMIT 1")
+    @Query("SELECT * FROM filament_rolls WHERE isActive = 1 AND notes NOT LIKE '[[ARCHIVED]]%' LIMIT 1")
     suspend fun getActiveRoll(): FilamentRollEntity?
 
     @Query("SELECT COALESCE(SUM(deltaGrams), 0) FROM filament_events WHERE rollId = :rollId AND createdAt > :afterTime")
     suspend fun sumDeltaAfter(rollId: Long, afterTime: Long): Int
 
-    @Query("UPDATE filament_rolls SET isActive = CASE WHEN id = :rollId THEN 1 ELSE 0 END, updatedAt = :updatedAt")
+    @Query("UPDATE filament_rolls SET isActive = CASE WHEN id = :rollId AND notes NOT LIKE '[[ARCHIVED]]%' THEN 1 ELSE 0 END, updatedAt = :updatedAt")
     suspend fun setActiveRollInternal(rollId: Long, updatedAt: Long)
+
+    @Query("UPDATE print_jobs SET status = 'CONFIRMED', rollId = :rollId, confirmedAt = :confirmedAt WHERE id = :jobId AND status = 'DRAFT'")
+    suspend fun markPrintJobConfirmedIfDraft(jobId: Long, rollId: Long, confirmedAt: Long): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRoll(roll: FilamentRollEntity): Long

@@ -80,6 +80,44 @@ final class EmbeddedSyncService implements AutoCloseable {
         return server != null;
     }
 
+    synchronized GcodeWatchService.WatchStatus currentWatchStatus() {
+        if (server == null) {
+            return new GcodeWatchService.WatchStatus(
+                GcodeWatchService.WatchLevel.IDLE,
+                "未启用",
+                "桌面同步服务未运行"
+            );
+        }
+
+        Config config = configSupplier.get();
+        if (config.useSample()) {
+            return new GcodeWatchService.WatchStatus(
+                GcodeWatchService.WatchLevel.WARNING,
+                "示例模式",
+                "当前未监听真实切片目录"
+            );
+        }
+
+        GcodeWatchService watcher = gcodeWatchService;
+        if (watcher == null) {
+            return new GcodeWatchService.WatchStatus(
+                GcodeWatchService.WatchLevel.INFO,
+                "初始化中",
+                "监听线程正在准备"
+            );
+        }
+
+        GcodeWatchService.WatchStatus base = watcher.currentStatus();
+        if (!isSyncBusy()) {
+            return base;
+        }
+        return new GcodeWatchService.WatchStatus(
+            base.level(),
+            base.summary(),
+            base.detail() + "，后台同步中"
+        );
+    }
+
     synchronized void stop() {
         GcodeWatchService watcher = gcodeWatchService;
         gcodeWatchService = null;
@@ -274,30 +312,24 @@ final class EmbeddedSyncService implements AutoCloseable {
     }
 
     private ProcessBuilder buildSyncAgentProcess(Config config, List<Path> explicitPaths) {
-        List<String> command = new ArrayList<>();
-        command.add(DesktopSyncApp.resolvePowerShellExecutable());
-        command.add("-NoProfile");
-        command.add("-ExecutionPolicy");
-        command.add("Bypass");
-        command.add("-File");
-        command.add(config.agentRoot().resolve("run-sync-agent.ps1").toString());
-        command.add("-MaxFileAgeDays");
-        command.add(Integer.toString(config.maxAgeDays()));
+        List<String> scriptArgs = new ArrayList<>();
+        scriptArgs.add("-MaxFileAgeDays");
+        scriptArgs.add(Integer.toString(config.maxAgeDays()));
         if (config.useSample()) {
-            command.add("-UseSample");
+            scriptArgs.add("-UseSample");
         } else {
-            command.add("-UseBambuGcode");
+            scriptArgs.add("-UseBambuGcode");
             if (!explicitPaths.isEmpty()) {
-                command.add("-GcodePaths");
+                scriptArgs.add("-GcodePaths");
                 explicitPaths.stream()
                     .map(path -> path.toAbsolutePath().normalize().toString())
-                    .forEach(command::add);
+                    .forEach(scriptArgs::add);
             } else if (!config.gcodeRoots().isEmpty()) {
-                command.add("-GcodeSearchRoots");
-                command.addAll(config.gcodeRoots());
+                scriptArgs.add("-GcodeSearchRoots");
+                scriptArgs.addAll(config.gcodeRoots());
             }
         }
-        return new ProcessBuilder(command);
+        return DesktopSyncApp.buildPowerShellProcess(config.agentRoot().resolve("run-sync-agent.ps1"), scriptArgs);
     }
 
     private String buildPullPayload() {
@@ -480,7 +512,7 @@ final class EmbeddedSyncService implements AutoCloseable {
     }
 
     private static Charset processOutputCharset() {
-        return Charset.defaultCharset();
+        return StandardCharsets.UTF_8;
     }
 
     private static String escapeJson(String value) {

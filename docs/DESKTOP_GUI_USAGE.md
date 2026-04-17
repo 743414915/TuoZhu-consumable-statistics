@@ -1,122 +1,142 @@
-# 桌面同步工具使用说明
+# 桌面端使用说明
+
+## 当前主方案
+
+当前正式方案是 `桌面 GUI + 内置 HTTP 服务 + PowerShell 同步引擎`。
+
+- 你平时只需要启动 `TuoZhuDesktopSync.exe`。
+- 不再需要单独手动运行旧的 `start-sync-server.ps1`。
+- 旧方案已经移动到 `desktop-agent/legacy/`，仅保留历史参考。
 
 ## 产物位置
 
-- 桌面应用目录：`dist/desktop/TuoZhuDesktopSync`
+- 桌面端目录：`dist/desktop/TuoZhuDesktopSync`
 - 启动文件：`dist/desktop/TuoZhuDesktopSync/TuoZhuDesktopSync.exe`
-- Android 调试包：`dist/tuozhu-consumable-manager-debug.apk`
 
-## 适用场景
+## 首次使用
 
-这个桌面工具用于把 Bambu Studio 生成的 `.gcode` 打印记录解析成手机端可消费的草稿任务。
+1. 打开 `TuoZhuDesktopSync.exe`。
+2. 确认 `Desktop Agent Root` 指向同目录下的 `desktop-agent`。
+3. 模式选择 `真实切片 G-code`。
+4. 在 `G-code Search Roots` 中保留或添加你的切片缓存目录。
 
-当前已经针对你的 A1 mini + 无 AMS 场景做了约束：
+推荐保留：
 
-- 只保留 `PLA Basic`
-- 只保留 `PETG Basic`
-- 只保留 `PLA Silk`
-- 真实 `.gcode` 同步优先从文件头提取材料、克重、打印时长
+- `%USERPROFILE%\Desktop`
+- `%LOCALAPPDATA%\Temp\bamboo_model`
 
-## 第一次使用
+5. 端口先保持默认 `8823`。
+6. `Max File Age (days)` 默认用 `7` 即可。
 
-1. 打开 `TuoZhuDesktopSync.exe`
-2. 确认左侧 `Desktop Agent Root` 指向应用目录内的 `desktop-agent`
-3. 模式选择 `Real Bambu G-code`
-4. 在 `G-code Search Roots` 中保留或补充你的切片输出目录
+## 日常操作
 
-推荐保留这两个目录：
+### 启动服务
 
-- `C:\Users\Administrator\Desktop`
-- `C:\Users\74341\AppData\Local\Temp\bamboo_model`
+点击 `启动服务` 后，桌面端会同时做三件事：
 
-5. 端口先保持默认 `8823`
-6. `Max File Age (days)` 可以先保持 `7`
+- 启动内置 HTTP 服务。
+- 启动 G-code 监听线程。
+- 执行一次后台同步，刷新草稿任务。
 
-## 常用操作
+### 手动扫描近切片
 
-### 1. 扫描一次
+点击 `手动扫描近切片` 后，会立即扫描最近生成的 `.gcode`，适合在监听漏抓时手动补扫。
 
-点击 `Scan Once`。
+### 扫码配对
 
-用途：
+点击 `扫码配对` 后，手机端可直接扫描桌面端二维码，把同步地址写入手机设置。
 
-- 立即扫描最近生成的 `.gcode`
-- 刷新草稿列表
-- 刷新 warning 和最近同步时间
+### 停止服务
 
-### 2. 启动同步服务
+点击 `停止服务` 后，会同时停止：
 
-点击 `Start Service`。
+- 内置 HTTP 服务
+- G-code 监听线程
+- 当前后台同步进程
 
-用途：
+## 地址显示逻辑
 
-- 在局域网内提供手机拉取接口
-- 手机端可以通过桌面地址拉取待确认任务
-- 手机确认后，桌面端会回写确认记录并刷新状态
+桌面端顶部会显示两类地址：
 
-启动后，顶部会显示：
+- `主推荐地址`
+  - 如果检测到 Tailscale 地址，优先显示 Tailscale。
+  - 否则显示当前最合适的局域网地址。
+- `局域网备用地址`
+  - 只在存在可用局域网地址时显示。
 
-- 服务状态
-- 手机访问地址
-- 待处理草稿数量
-- warning 数量
-- 最近同步时间
+推荐规则的目标是：
 
-### 3. 停止同步服务
+- 同时支持局域网使用。
+- 当你已经打通 Tailscale 时，优先给出可跨网络访问的地址。
 
-点击 `Stop Service`。
+## 网络说明
 
-## 手机端地址
+### 局域网模式
 
-桌面端启动服务后，手机端同步地址填写：
-
-`http://你的电脑局域网IP:8823`
-
-例如：
-
-`http://192.168.1.8:8823`
+适用于手机和电脑在同一 Wi-Fi 下的场景。
 
 要求：
 
-- 手机和电脑在同一个局域网
-- Windows 防火墙不要拦截这个端口
+- 手机和电脑可互相访问。
+- Windows 允许桌面程序监听该端口。
 
-## 真实 G-code 同步规则
+### Tailscale 模式
 
-当前桌面端会从 `.gcode` 文件头提取这些信息：
+适用于不在同一局域网时的跨网络访问。
 
-- `total filament weight [g]`
-- `model printing time`
-- `printer_model`
-- `filament_settings_id`
-- `filament_type`
-- `default_filament_profile`
+要求：
 
-并映射为：
+- 手机和电脑都已安装并登录 Tailscale。
+- 两端已经互通。
 
-- `externalJobId`
-- `modelName`
-- `estimatedUsageGrams`
-- `targetMaterial`
-- `note`
-- `createdAt`
+当 Tailscale 可用时，桌面端会优先推荐 Tailscale 地址，手机端直接使用该地址即可。
 
-如果材料字段有冲突，系统会：
+## G-code 监听逻辑
 
-- 仍然生成草稿
-- 在 `Warnings` 面板里提示冲突来源
+桌面端当前不是只扫一次目录，而是包含完整监听链路：
 
-## 你现在最需要做的事
+1. 监听 `bamboo_model` 及其最近出现的子目录。
+2. 发现新目录或 `Metadata` 变化时，触发回补扫描。
+3. 对新 `.gcode` 做稳定性判定，避免文件尚未写完就被解析。
+4. 稳定后再触发同步引擎生成草稿任务。
 
-1. 用桌面版启动一次 `Start Service`
-2. 把顶部显示的手机地址填进 Android 应用
-3. 在 Bambu Studio 切片后，观察桌面端是否出现新的草稿
-4. 在手机端确认一次耗材扣减，验证整条链路
+这套机制专门针对 Bambu Studio 的临时缓存目录会延迟出现、会被覆盖、软件关闭后会清空的特点。
 
-## 已验证的回归项
+## 材料识别范围
 
-- 桌面应用重新打包成功
-- 打包后的 GUI 可以正常启动
-- 样例扫描成功
-- 真实 `.gcode` 扫描成功
-- HTTP `health / pull / confirm` 闭环成功
+当前只保留三种材料：
+
+- `PLA Basic`
+- `PETG Basic`
+- `PLA Silk`
+
+如果 `.gcode` 头中的多个材料字段互相冲突，系统会：
+
+- 按预设优先级选择一个结果继续生成草稿。
+- 把冲突信息写入 `Warnings`。
+
+## 日志与状态
+
+桌面端界面会持续显示：
+
+- 服务状态
+- 主推荐地址
+- 局域网备用地址
+- G-code 监听状态
+- 待确认任务数
+- 警告数
+- 最近同步时间
+- 实时日志
+
+如果手机端提示超时，优先检查：
+
+1. 桌面端是否已点击 `启动服务`。
+2. 顶部推荐地址是否和手机配置一致。
+3. 手机是否能访问桌面端 `/health`。
+
+## 相关代码
+
+- GUI 入口：`desktop-app/src/main/java/com/tuozhu/desktop/DesktopSyncApp.java`
+- 内置服务：`desktop-app/src/main/java/com/tuozhu/desktop/EmbeddedSyncService.java`
+- G-code 监听：`desktop-app/src/main/java/com/tuozhu/desktop/GcodeWatchService.java`
+- 同步引擎：`desktop-agent/run-sync-agent.ps1`

@@ -438,29 +438,23 @@ public final class DesktopSyncApp extends JFrame {
             throw new IllegalArgumentException("Embedded desktop server no longer uses the PowerShell server mode.");
         }
         Path scriptPath = agentRoot().resolve("run-sync-agent.ps1");
-        List<String> command = new ArrayList<>();
-        command.add(resolvePowerShellExecutable());
-        command.add("-NoProfile");
-        command.add("-ExecutionPolicy");
-        command.add("Bypass");
-        command.add("-File");
-        command.add(scriptPath.toString());
+        List<String> scriptArgs = new ArrayList<>();
 
-        command.add("-MaxFileAgeDays");
-        command.add(safeText(maxAgeField.getText(), "7"));
+        scriptArgs.add("-MaxFileAgeDays");
+        scriptArgs.add(safeText(maxAgeField.getText(), "7"));
 
         if (sampleModeButton.isSelected()) {
-            command.add("-UseSample");
+            scriptArgs.add("-UseSample");
         } else {
-            command.add("-UseBambuGcode");
+            scriptArgs.add("-UseBambuGcode");
             List<String> roots = parseSearchRoots();
             if (!roots.isEmpty()) {
-                command.add("-GcodeSearchRoots");
-                command.addAll(roots);
+                scriptArgs.add("-GcodeSearchRoots");
+                scriptArgs.addAll(roots);
             }
         }
 
-        ProcessBuilder builder = new ProcessBuilder(command);
+        ProcessBuilder builder = buildPowerShellProcess(scriptPath, scriptArgs);
         builder.directory(workspaceRoot.toFile());
         builder.redirectErrorStream(true);
         return builder;
@@ -489,13 +483,31 @@ public final class DesktopSyncApp extends JFrame {
             watchStatusValue.setForeground(MUTED);
             return;
         }
-        if (sampleModeButton.isSelected()) {
-            watchStatusValue.setText("\u793a\u4f8b\u6a21\u5f0f");
-            watchStatusValue.setForeground(WARN);
-            return;
+        GcodeWatchService.WatchStatus status = embeddedSyncService.currentWatchStatus();
+        watchStatusValue.setText(formatWatchStatus(status));
+        watchStatusValue.setForeground(colorForWatchStatus(status.level()));
+    }
+
+    private static String formatWatchStatus(GcodeWatchService.WatchStatus status) {
+        String detail = status.detail() == null ? "" : status.detail().trim();
+        if (detail.isEmpty()) {
+            return status.summary();
         }
-        watchStatusValue.setText("\u7b49\u5f85\u5207\u7247");
-        watchStatusValue.setForeground(SUCCESS);
+        return "<html><div style='line-height:1.25;max-width:220px;'><span style='font-size:12px;'>"
+            + status.summary()
+            + "</span><br><span style='font-size:11px;color:#9EADBF;'>"
+            + detail
+            + "</span></div></html>";
+    }
+
+    private static Color colorForWatchStatus(GcodeWatchService.WatchLevel level) {
+        return switch (level) {
+            case IDLE -> DesktopSyncApp.MUTED;
+            case INFO -> DesktopSyncApp.WARN;
+            case SUCCESS -> DesktopSyncApp.SUCCESS;
+            case WARNING -> DesktopSyncApp.WARN;
+            case ERROR -> DesktopSyncApp.ERROR;
+        };
     }
 
     private void chooseDirectory(JTextField targetField) {
@@ -904,8 +916,45 @@ public final class DesktopSyncApp extends JFrame {
         return "powershell.exe";
     }
 
+    static ProcessBuilder buildPowerShellProcess(Path scriptPath, List<String> scriptArgs) {
+        List<String> command = new ArrayList<>();
+        command.add(resolvePowerShellExecutable());
+        command.add("-NoProfile");
+        command.add("-ExecutionPolicy");
+        command.add("Bypass");
+        command.add("-Command");
+        command.add(buildPowerShellUtf8Command(scriptPath, scriptArgs));
+        return new ProcessBuilder(command);
+    }
+
+    private static String buildPowerShellUtf8Command(Path scriptPath, List<String> scriptArgs) {
+        StringBuilder command = new StringBuilder();
+        command.append("$utf8 = [System.Text.UTF8Encoding]::new($false);");
+        command.append("[Console]::InputEncoding = $utf8;");
+        command.append("[Console]::OutputEncoding = $utf8;");
+        command.append("$OutputEncoding = $utf8;");
+        command.append("& ");
+        command.append(toPowerShellLiteral(scriptPath.toAbsolutePath().normalize().toString()));
+        for (String argument : scriptArgs) {
+            command.append(' ');
+            command.append(toPowerShellArgument(argument));
+        }
+        return command.toString();
+    }
+
+    private static String toPowerShellLiteral(String value) {
+        return "'" + value.replace("'", "''") + "'";
+    }
+
+    private static String toPowerShellArgument(String value) {
+        if (value.matches("-[A-Za-z][A-Za-z0-9]*")) {
+            return value;
+        }
+        return toPowerShellLiteral(value);
+    }
+
     static Charset processOutputCharset() {
-        return Charset.defaultCharset();
+        return StandardCharsets.UTF_8;
     }
 
     private static Path locateWorkspaceRoot() {

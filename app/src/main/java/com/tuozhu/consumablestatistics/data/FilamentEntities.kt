@@ -109,3 +109,7 @@ enum class SyncConnectionStatus {
     OFFLINE,
     ERROR,
 }
+
+const val ARCHIVED_ROLL_NOTE_PREFIX = "[[ARCHIVED]]"
+
+fun FilamentRollEntity.isArchivedRoll(): Boolean = notes.startsWith(ARCHIVED_ROLL_NOTE_PREFIX)

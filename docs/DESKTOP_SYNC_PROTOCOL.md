@@ -1,91 +1,157 @@
-# Desktop Sync Protocol
+# 桌面同步协议
 
-## Goal
+## 目标
 
-桌面同步器负责把打印任务草稿推送给手机端。手机端先展示为“待确认打印任务”，只有用户确认后，才会把消耗写入活动耗材卷的事件流。
+桌面端负责把最近切片生成的打印任务转换为“待确认草稿”，手机端只在用户确认后才真正扣减耗材卷。
 
-当前状态说明：
+当前正式链路：
 
-- `desktop-agent/run-sync-agent.ps1` 已经能在项目目录内产出标准 JSON 草稿和确认回执状态
-- `desktop-agent/run-sync-agent.ps1` 现已支持直接解析 Bambu Studio 生成的 `.gcode` 文件头
-- Android 端当前仍使用 `LocalSyncCoordinator` 演示数据，还没有直接读取桌面同步器的 outbox 文件
-- 后续接线时只需要新增真正的 `DesktopAgentSyncCoordinator`，不需要改草稿结构
+- 桌面 GUI：`desktop-app`
+- 内置 HTTP 服务：`EmbeddedSyncService`
+- 解析引擎：`desktop-agent/run-sync-agent.ps1`
+- Android 同步实现：`DesktopAgentSyncCoordinator`
 
-## Draft Payload
+## HTTP 接口
 
-最小字段：
+### `GET /health`
+
+用于手机端或用户手动探测桌面服务是否可达。
+
+示例响应：
 
 ```json
 {
-  "externalJobId": "desktop-demo-benchy",
+  "status": "ok",
+  "source": "DESKTOP_AGENT",
+  "serverTime": 1776070800109,
+  "syncBusy": false
+}
+```
+
+### `GET /api/sync/pull`
+
+返回当前草稿任务、告警、输入模式和同步状态。
+
+示例响应：
+
+```json
+{
+  "status": "SUCCESS",
+  "source": "DESKTOP_AGENT",
+  "syncedAt": 1775806800000,
+  "message": "桌面同步完成，待确认任务 1 条。",
+  "draftJobs": [],
+  "warnings": [],
+  "inputMode": "bambu-gcode",
+  "syncBusy": false
+}
+```
+
+说明：
+
+- 当 `syncBusy=true` 且已有缓存时，桌面端可能返回“已返回当前缓存，桌面端正在后台刷新”。
+- 这不是错误，表示先给手机端旧缓存，同时后台继续刷新。
+
+### `POST /api/sync/confirm`
+
+手机端确认打印后回写回执。
+
+请求体：
+
+```json
+{
+  "externalJobId": "bambu-gcode-23028-0",
+  "confirmedAt": 1775806800000,
+  "targetRollId": 1
+}
+```
+
+确认成功后，桌面端会把该回执写入 `desktop-agent/outbox/confirmation-log.json`，并立刻触发一次后台同步。
+
+## 草稿任务结构
+
+```json
+{
+  "externalJobId": "bambu-gcode-23028-0",
   "source": "DESKTOP_AGENT",
   "modelName": "Benchy Demo",
   "estimatedUsageGrams": 28,
   "targetMaterial": "PLA Basic",
-  "note": "来自桌面同步器演示数据",
+  "note": "来自 Bambu Studio 切片文件 .23028.0.gcode",
   "createdAt": 1775805900000
 }
 ```
 
-字段说明：
+字段约束：
 
-- `externalJobId`: 来源系统里的唯一打印任务 ID
-- `source`: 当前支持 `DESKTOP_AGENT`、`CLOUD`
-- `modelName`: 模型名或任务名
-- `estimatedUsageGrams`: 预计耗材克重，必须大于 0
-- `targetMaterial`: 可选，用于手机端提示材料；当前只允许 `PLA Basic`、`PETG Basic`、`PLA Silk`
-- `note`: 附加信息
-- `createdAt`: 任务时间戳，必须在合理时间范围内
+- `externalJobId`：必须唯一，用于桌面和手机两端幂等。
+- `source`：当前允许 `DESKTOP_AGENT`、`CLOUD`。
+- `modelName`：不能为空。
+- `estimatedUsageGrams`：必须大于 `0`。
+- `targetMaterial`：当前只允许 `PLA Basic`、`PETG Basic`、`PLA Silk`，也可以为空。
+- `createdAt`：必须是合理时间戳。
 
-`desktop-outbox.json` 必须始终保持 JSON 数组格式，即使只剩 1 条草稿。
+`desktop-outbox.json` 必须始终保持 JSON 数组格式。
 
-## Bambu Studio G-code Mapping
+## G-code 映射规则
 
-桌面同步器在 `.gcode` 模式下会读取 Bambu Studio 文件头，并映射成同一份草稿协议：
+桌面同步引擎从 Bambu Studio `.gcode` 文件头读取以下字段：
 
-- `total filament weight [g]` -> `estimatedUsageGrams`
-  - 当前按向上取整转为整数
-- `filament_settings_id` / `filament_type` / `default_filament_profile` -> `targetMaterial`
-  - 优先级依次为：
+- `total filament weight [g]`
+- `model printing time`
+- `printer_model`
+- `filament_settings_id`
+- `filament_type`
+- `default_filament_profile`
+
+映射规则：
+
+- `estimatedUsageGrams`
+  - 来自 `total filament weight [g]`
+  - 当前按向上取整处理
+- `targetMaterial`
+  - 优先级：
     1. `filament_settings_id`
     2. `filament_type`
     3. `default_filament_profile`
-  - 若出现冲突，以更高优先级结果为准，并写入 warning
-- 文件名 `.23028.0.gcode` -> `externalJobId = bambu-gcode-23028-0`
-  - 若文件名无法解析，则退回头信息指纹哈希
-- 文件最后修改时间 -> `createdAt`
-- 头信息里的项目名/3mf 名称 -> `modelName`
+  - 如果多个字段冲突，保留高优先级结果并记录 warning
+- `modelName`
+  - 优先从 `filament_settings_id` 中的 `(... .3mf)` 提取
+  - 提取不到时回退到文件名
+- `externalJobId`
+  - 优先从文件名如 `.23028.0.gcode` 解析为 `bambu-gcode-23028-0`
+  - 再退回到基于内容指纹生成的稳定 ID
+- `createdAt`
+  - 使用 `.gcode` 文件最后修改时间
 
-示例：实际观测到的文件头里，`filament_settings_id` 指向 `PETG Basic`，但 `default_filament_profile` 写成了 `PLA Basic`。当前协议会保留 `PETG Basic`，并记录一条冲突 warning。
+## 幂等规则
 
-## Idempotency
+### 桌面端
 
-手机端以 `externalJobId` 做幂等：
+- 以 `externalJobId` 为主键更新本地状态。
+- 已确认任务不会再次变回草稿。
+- 重复草稿会刷新内容，不会无限新增重复任务。
 
-- 若不存在，则插入 `PrintJobEntity(status = DRAFT)`
-- 若已存在且仍是 `DRAFT`，允许更新任务名、预计克重、备注、创建时间
-- 若已确认，则忽略重复推送，不再创建新的耗材事件
-- 桌面同步器本地状态同样以 `externalJobId` 做幂等，并把告警写入 `state.json`
+### Android 端
 
-## Confirmation Flow
+- 同样以 `externalJobId` 保证幂等。
+- 已确认任务只允许写入一次打印消耗事件。
+- 确认时会校验活动卷材料是否匹配、剩余克重是否足够。
 
-1. 手机端拉取草稿任务
-2. 用户在首页“待确认打印任务”区点击“确认并扣减”
-3. 如果任务未绑定卷，则默认作用到当前活动卷；若当前没有活动卷，确认应失败并提示用户先设置活动卷
-4. 手机端把 `PrintJobEntity.status` 改为 `CONFIRMED`
-5. 同时新增一条 `FilamentEventEntity(type = PRINT_USAGE)`
-6. 桌面侧收到确认回执后，把对应草稿标为 `CONFIRMED`，并从 outbox 中移除
+## 确认链路
 
-## Event Mapping
+1. 手机端拉取草稿任务。
+2. 用户选择目标耗材卷或使用当前活动卷。
+3. Android 端本地写入一次 `PRINT_USAGE` 事件并把任务标记为 `CONFIRMED`。
+4. Android 端调用 `POST /api/sync/confirm`。
+5. 桌面端写入确认回执。
+6. 后台同步再次运行，已确认草稿从桌面 outbox 中消失。
 
-确认后的事件格式：
+## 运行时文件
 
-- `type = PRINT_USAGE`
-- `source = DESKTOP_AGENT`
-- `deltaGrams = -estimatedUsageGrams`
-- `remainingAfterGrams = clamp(calculateRemaining(roll) - estimatedUsageGrams)`
-- `externalJobId = printJob.externalJobId`
+- `desktop-agent/inbox/print-history.generated.json`
+- `desktop-agent/outbox/desktop-outbox.json`
+- `desktop-agent/outbox/confirmation-log.json`
+- `desktop-agent/state/state.json`
 
-## Future Extension
-
-后续如果接入局域网服务或云端 API，建议保留相同草稿模型，只新增传输方式，不改手机端确认逻辑。
+这些文件属于当前协议的一部分，但它们是运行时状态，不是用户直接操作入口。
