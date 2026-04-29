@@ -13,6 +13,10 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
@@ -45,6 +49,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -54,8 +59,10 @@ import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
+import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
@@ -72,28 +79,29 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 
 public final class DesktopSyncApp extends JFrame {
-    private static final Color PAGE = new Color(0x0B1118);
-    private static final Color PANEL = new Color(0x131C26);
-    private static final Color PANEL_SOFT = new Color(0x1A2431);
-    private static final Color PANEL_SOFT_ALT = new Color(0x202C3A);
-    private static final Color LINE = new Color(0x2A3644);
-    private static final Color TEXT = new Color(0xF4F7FA);
-    private static final Color MUTED = new Color(0x9EADBF);
-    private static final Color ACCENT = new Color(0xB96223);
-    private static final Color SUCCESS = new Color(0x1F8F74);
-    private static final Color WARN = new Color(0xC99722);
-    private static final Color ERROR = new Color(0xB54A53);
-    private static final Color BUTTON_SECONDARY = new Color(0x1D2834);
-    private static final Color BUTTON_SECONDARY_BORDER = new Color(0x314152);
+    // Linear-inspired dark palette: charcoal base, neutral grays, warm accents
+    private static final Color PAGE = new Color(0x0D0D0D);
+    private static final Color PANEL = new Color(0x1A1A1A);
+    private static final Color PANEL_SOFT = new Color(0x222222);
+    private static final Color PANEL_SOFT_ALT = new Color(0x2A2A2A);
+    private static final Color LINE = new Color(0x333333);
+    private static final Color TEXT = new Color(0xEDEDED);
+    private static final Color MUTED = new Color(0x888888);
+    private static final Color ACCENT = new Color(0xE8792B);
+    private static final Color SUCCESS = new Color(0x3CB371);
+    private static final Color WARN = new Color(0xD4A028);
+    private static final Color ERROR = new Color(0xE5484D);
+    private static final Color BUTTON_SECONDARY = new Color(0x262626);
+    private static final Color BUTTON_SECONDARY_BORDER = new Color(0x3A3A3A);
 
-    private static final String APP_TITLE = "\u62d3\u7af9\u684c\u9762\u540c\u6b65";
-    private static final String STATUS_STOPPED = "\u5df2\u505c\u6b62";
-    private static final String STATUS_STARTING = "\u542f\u52a8\u4e2d";
-    private static final String STATUS_RUNNING = "\u8fd0\u884c\u4e2d";
-    private static final String STATUS_STOPPING = "\u505c\u6b62\u4e2d";
-    private static final String STATUS_ERROR = "\u9519\u8bef";
-    private static final String BUTTON_SCAN = "\u624b\u52a8\u626b\u63cf\u8fd1\u5207\u7247";
-    private static final String BUTTON_SCANNING = "\u626b\u63cf\u4e2d...";
+    private static final String APP_TITLE = "拓竹桌面同步";
+    private static final String STATUS_STOPPED = "已停止";
+    private static final String STATUS_STARTING = "启动中";
+    private static final String STATUS_RUNNING = "运行中";
+    private static final String STATUS_STOPPING = "停止中";
+    private static final String STATUS_ERROR = "错误";
+    private static final String BUTTON_SCAN = "手动扫描近切片";
+    private static final String BUTTON_SCANNING = "扫描中...";
     private static final String FONT_UI = resolveFontName(
         "Microsoft YaHei UI",
         "Microsoft YaHei",
@@ -127,6 +135,14 @@ public final class DesktopSyncApp extends JFrame {
     private final JRadioButton sampleModeButton;
     private final JRadioButton bambuModeButton;
 
+    private boolean logPanelCollapsed = false;
+    private JButton logToggleButton;
+    private JCheckBox autoScrollCheckbox;
+    private JScrollPane previewScrollPane;
+    private JScrollPane warningsScrollPane;
+    private JScrollPane logScrollPane;
+    private JPanel logContentPanel;
+
     private volatile EmbeddedSyncService embeddedSyncService;
     private final Timer snapshotTimer;
 
@@ -146,21 +162,21 @@ public final class DesktopSyncApp extends JFrame {
         this.maxAgeField = new JTextField("7");
         this.serviceStatusValue = statValue(STATUS_STOPPED);
         this.endpointValue = statValue(buildEndpointHint());
-        this.lanEndpointValue = statValue("\u6682\u65e0\u53ef\u7528\u5730\u5740");
-        this.watchStatusValue = statValue("\u672a\u542f\u7528");
+        this.lanEndpointValue = statValue("暂无可用地址");
+        this.watchStatusValue = statValue("未启用");
         this.pendingDraftsValue = statValue("--");
         this.warningsValue = statValue("--");
-        this.lastSyncValue = statValue("\u5c1a\u672a\u540c\u6b65");
+        this.lastSyncValue = statValue("尚未同步");
         this.pairingQrLabel = new JLabel();
-        this.pairingQrHint = new JLabel("\u542f\u52a8\u670d\u52a1\u540e\u4f1a\u5728\u8fd9\u91cc\u751f\u6210\u624b\u673a\u626b\u7801\u914d\u5bf9\u4e8c\u7ef4\u7801");
+        this.pairingQrHint = new JLabel("启动服务后会在这里生成手机扫码配对二维码");
         this.previewArea = buildReadOnlyArea();
         this.warningsArea = buildReadOnlyArea();
         this.logArea = buildReadOnlyArea();
         this.scanButton = actionButton(BUTTON_SCAN);
-        this.startServiceButton = actionButton("\u542f\u52a8\u670d\u52a1");
-        this.stopServiceButton = actionButton("\u505c\u6b62\u670d\u52a1");
-        this.sampleModeButton = modeButton("\u793a\u4f8b\u4efb\u52a1");
-        this.bambuModeButton = modeButton("\u771f\u5b9e\u5207\u7247 G-code");
+        this.startServiceButton = actionButton("启动服务");
+        this.stopServiceButton = actionButton("停止服务");
+        this.sampleModeButton = modeButton("示例任务");
+        this.bambuModeButton = modeButton("真实切片 G-code");
 
         tonePrimaryButton(scanButton, ACCENT);
         tonePrimaryButton(startServiceButton, SUCCESS);
@@ -168,10 +184,19 @@ public final class DesktopSyncApp extends JFrame {
 
         setTitle(APP_TITLE);
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
-        setMinimumSize(new Dimension(1280, 900));
+        setMinimumSize(new Dimension(960, 680));
         setLocationByPlatform(true);
         setContentPane(buildContent());
         installActions();
+
+        addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                adjustResponsiveSizes();
+            }
+        });
+        SwingUtilities.invokeLater(this::adjustResponsiveSizes);
+
         refreshSnapshot();
 
         this.snapshotTimer = new Timer(2500, event -> refreshSnapshot());
@@ -189,9 +214,18 @@ public final class DesktopSyncApp extends JFrame {
         JPanel root = new JPanel(new BorderLayout(18, 18));
         root.setBackground(PAGE);
         root.setBorder(new EmptyBorder(22, 22, 22, 22));
-        root.add(buildHeader(), BorderLayout.NORTH);
+
+        JPanel northContainer = new JPanel(new BorderLayout());
+        northContainer.setOpaque(false);
+        northContainer.add(buildHeader(), BorderLayout.CENTER);
+        JSeparator headerSeparator = new JSeparator();
+        headerSeparator.setForeground(LINE);
+        headerSeparator.setBackground(LINE);
+        northContainer.add(headerSeparator, BorderLayout.SOUTH);
+        root.add(northContainer, BorderLayout.NORTH);
+
         root.add(buildMainSplit(), BorderLayout.CENTER);
-        root.add(buildLogPanel(), BorderLayout.SOUTH);
+        root.add(buildSouthPanel(), BorderLayout.SOUTH);
         return root;
     }
 
@@ -208,7 +242,7 @@ public final class DesktopSyncApp extends JFrame {
         title.setFont(uiFont(Font.BOLD, 30));
 
         JLabel subtitle = new JLabel(
-            "\u684c\u9762\u7aef\u8d1f\u8d23\u76d1\u542c Bambu \u5207\u7247\u7f13\u5b58\uff0c\u81ea\u52a8\u6355\u83b7 G-code\uff0c\u63d0\u4f9b\u5185\u7f6e\u540c\u6b65\u670d\u52a1\uff0c\u5e76\u4f18\u5148\u652f\u6301 Tailscale \u8fde\u63a5\u3002"
+            "桌面端负责监听 Bambu 切片缓存，自动捕获 G-code，提供内置同步服务，并优先支持 Tailscale 连接。"
         );
         subtitle.setForeground(MUTED);
         subtitle.setFont(uiFont(Font.PLAIN, 13));
@@ -219,13 +253,13 @@ public final class DesktopSyncApp extends JFrame {
 
         JPanel stats = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         stats.setOpaque(false);
-        stats.add(statCard("\u670d\u52a1\u72b6\u6001", serviceStatusValue));
-        stats.add(statCard("\u4e3b\u63a8\u8350\u5730\u5740", endpointValue));
-        stats.add(statCard("\u5c40\u57df\u7f51\u5907\u7528\u5730\u5740", lanEndpointValue));
-        stats.add(statCard("G-code \u76d1\u542c", watchStatusValue));
-        stats.add(statCard("\u5f85\u786e\u8ba4\u6570", pendingDraftsValue));
-        stats.add(statCard("\u8b66\u544a\u6570", warningsValue));
-        stats.add(statCard("\u6700\u8fd1\u540c\u6b65", lastSyncValue));
+        stats.add(statCard("服务状态", serviceStatusValue));
+        stats.add(statCard("主推荐地址", endpointValue));
+        stats.add(statCard("局域网备用地址", lanEndpointValue));
+        stats.add(statCard("G-code 监听", watchStatusValue));
+        stats.add(statCard("待确认数", pendingDraftsValue));
+        stats.add(statCard("警告数", warningsValue));
+        stats.add(statCard("最近同步", lastSyncValue));
 
         panel.add(titleBlock, BorderLayout.WEST);
         panel.add(stats, BorderLayout.EAST);
@@ -233,12 +267,13 @@ public final class DesktopSyncApp extends JFrame {
     }
 
     private JSplitPane buildMainSplit() {
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, buildControlPanel(), buildPreviewPanel());
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, buildControlTabs(), buildPreviewPanel());
         splitPane.setResizeWeight(0.43d);
         splitPane.setBorder(null);
         splitPane.setOpaque(false);
         splitPane.setBackground(PAGE);
-        splitPane.setDividerSize(8);
+        splitPane.setDividerSize(10);
+        splitPane.setContinuousLayout(true);
         splitPane.setUI(new BasicSplitPaneUI() {
             @Override
             public BasicSplitPaneDivider createDefaultDivider() {
@@ -251,43 +286,108 @@ public final class DesktopSyncApp extends JFrame {
         return splitPane;
     }
 
-    private JPanel buildControlPanel() {
-        JPanel panel = cardPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+    private JTabbedPane buildControlTabs() {
+        JTabbedPane tabs = new JTabbedPane(SwingConstants.TOP);
+        tabs.setUI(new javax.swing.plaf.basic.BasicTabbedPaneUI());
+        tabs.setBackground(PANEL);
+        tabs.setForeground(TEXT);
+        tabs.setFont(uiFont(Font.BOLD, 13));
+        tabs.setBorder(null);
 
-        panel.add(sectionTitle("\u540c\u6b65\u63a7\u5236"));
-        panel.add(sectionHint("\u542f\u52a8\u670d\u52a1\u540e\u4f1a\u81ea\u52a8\u76d1\u542c Bambu Studio \u7f13\u5b58\u76ee\u5f55\uff0c\u53d1\u73b0\u65b0\u5207\u7247\u540e\u4f1a\u5148\u7b49\u6587\u4ef6\u5199\u5165\u7a33\u5b9a\uff0c\u518d\u81ea\u52a8\u8f6c\u5165\u8349\u7a3f\u3002\u624b\u52a8\u626b\u63cf\u53ea\u7528\u4e8e\u5149\u542c\u7f51\u6355\u5076\u53d1\u6f0f\u6355\u65f6\u7684\u5160\u5e95\u3002"));
+        tabs.addTab("服务", buildServiceTab());
+        tabs.addTab("路径", buildPathsTab());
+        tabs.addTab("帮助", buildHelpTab());
+
+        tabs.setForegroundAt(0, TEXT);
+        tabs.setBackgroundAt(0, PANEL_SOFT);
+        tabs.setForegroundAt(1, TEXT);
+        tabs.setBackgroundAt(1, PANEL_SOFT);
+        tabs.setForegroundAt(2, TEXT);
+        tabs.setBackgroundAt(2, PANEL_SOFT);
+
+        return tabs;
+    }
+
+    private JPanel buildServiceTab() {
+        JPanel panel = new JPanel();
+        panel.setBackground(PANEL);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(new EmptyBorder(16, 16, 16, 16));
+
+        panel.add(sectionTitle("同步控制"));
+        panel.add(sectionHint(
+            "启动服务后会自动监听 Bambu Studio 缓存目录，发现新切片后会先等文件写入稳定，再自动转入草稿。手动扫描只用于光听网捕偶发漏捕时的兠底。"
+        ));
         panel.add(Box.createVerticalStrut(16));
-        panel.add(formRow("\u684c\u9762\u540c\u6b65\u76ee\u5f55", agentRootField, textButton("\u6d4f\u89c8", event -> chooseDirectory(agentRootField))));
-        panel.add(Box.createVerticalStrut(12));
         panel.add(modeSelector());
         panel.add(Box.createVerticalStrut(12));
-        panel.add(multilineRow("G-code \u641c\u7d22\u76ee\u5f55", gcodeRootsArea, textButton("\u6dfb\u52a0\u76ee\u5f55", event -> appendSearchRoot())));
-        panel.add(Box.createVerticalStrut(12));
-        panel.add(twoFieldRow("\u7aef\u53e3", portField, "\u6700\u5927\u6587\u4ef6\u5929\u6570", maxAgeField));
+        panel.add(twoFieldRow("端口", portField, "最大文件天数", maxAgeField));
         panel.add(Box.createVerticalStrut(18));
 
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        actions.setOpaque(false);
-        actions.add(scanButton);
-        actions.add(startServiceButton);
-        actions.add(stopServiceButton);
-        actions.add(textButton("\u590d\u5236\u63a8\u8350\u5730\u5740", event -> copyRecommendedEndpoint()));
-        actions.add(textButton("\u5237\u65b0\u63a8\u8350\u5730\u5740", event -> refreshRecommendedEndpoint()));
-        actions.add(textButton("\u6253\u5f00\u8f93\u51fa\u76ee\u5f55", event -> openPath(agentRoot().resolve("outbox"))));
-        actions.add(textButton("\u6253\u5f00\u72b6\u6001\u76ee\u5f55", event -> openPath(agentRoot().resolve("state"))));
-        panel.add(actions);
+        JPanel actionRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        actionRow1.setOpaque(false);
+        scanButton.setMinimumSize(new Dimension(110, 32));
+        startServiceButton.setMinimumSize(new Dimension(110, 32));
+        stopServiceButton.setMinimumSize(new Dimension(110, 32));
+        actionRow1.add(scanButton);
+        actionRow1.add(startServiceButton);
+        actionRow1.add(stopServiceButton);
+        panel.add(actionRow1);
+        panel.add(Box.createVerticalStrut(10));
 
-        panel.add(Box.createVerticalStrut(16));
-        JSeparator separator = new JSeparator();
-        separator.setForeground(LINE);
-        separator.setBackground(LINE);
-        panel.add(separator);
-        panel.add(Box.createVerticalStrut(16));
-        panel.add(sectionTitle("\u4f7f\u7528\u63d0\u793a"));
-        panel.add(sectionHint("\u5efa\u8bae\u6d41\u7a0b\uff1a\u5148\u542f\u52a8\u670d\u52a1\uff0c\u4fdd\u6301 Bambu Studio \u8fd0\u884c\uff0c\u5b8c\u6210\u5207\u7247\u540e\u7531\u684c\u9762\u7aef\u81ea\u52a8\u6355\u83b7\u5e76\u5165\u8349\u7a3f\uff0c\u624b\u673a\u7aef\u518d\u62c9\u53d6\u3001\u786e\u8ba4\u8017\u6750\u3002"));
+        JPanel actionRow2 = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        actionRow2.setOpaque(false);
+        JButton copyBtn = textButton("复制推荐地址", event -> copyRecommendedEndpoint());
+        JButton refreshBtn = textButton("刷新推荐地址", event -> refreshRecommendedEndpoint());
+        JButton outboxBtn = textButton("打开输出目录", event -> openPath(agentRoot().resolve("outbox")));
+        JButton stateBtn = textButton("打开状态目录", event -> openPath(agentRoot().resolve("state")));
+        Dimension minBtnSize = new Dimension(130, 32);
+        copyBtn.setMinimumSize(minBtnSize);
+        refreshBtn.setMinimumSize(minBtnSize);
+        outboxBtn.setMinimumSize(minBtnSize);
+        stateBtn.setMinimumSize(minBtnSize);
+        actionRow2.add(copyBtn);
+        actionRow2.add(refreshBtn);
+        actionRow2.add(outboxBtn);
+        actionRow2.add(stateBtn);
+        panel.add(actionRow2);
+
+        return panel;
+    }
+
+    private JPanel buildPathsTab() {
+        JPanel panel = new JPanel();
+        panel.setBackground(PANEL);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(new EmptyBorder(16, 16, 16, 16));
+
+        panel.add(sectionTitle("路径配置"));
+        panel.add(Box.createVerticalStrut(12));
+        panel.add(formRow("桌面同步目录", agentRootField,
+            textButton("浏览", event -> chooseDirectory(agentRootField))));
+        panel.add(Box.createVerticalStrut(12));
+        panel.add(multilineRow("G-code 搜索目录", gcodeRootsArea,
+            textButton("添加目录", event -> appendSearchRoot())));
+
+        return panel;
+    }
+
+    private JPanel buildHelpTab() {
+        JPanel panel = new JPanel();
+        panel.setBackground(PANEL);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(new EmptyBorder(16, 16, 16, 16));
+
+        panel.add(sectionTitle("使用提示"));
+        panel.add(Box.createVerticalStrut(12));
+        panel.add(sectionHint(
+            "建议流程：先启动服务，保持 Bambu Studio 运行，完成切片后由桌面端自动捕获并入草稿，手机端再拉取、确认耗材。"
+        ));
         panel.add(Box.createVerticalStrut(8));
-        panel.add(sectionHint("\u5f53\u524d GUI \u5df2\u5185\u7f6e HTTP \u540c\u6b65\u670d\u52a1\uff0c\u5e95\u5c42\u4ecd\u4f7f\u7528 PowerShell \u540c\u6b65\u5f15\u64ce\u751f\u6210\u8349\u7a3f\u548c\u72b6\u6001\u3002"));
+        panel.add(sectionHint(
+            "当前 GUI 已内置 HTTP 同步服务，底层仍使用 PowerShell 同步引擎生成草稿和状态。"
+        ));
+
         return panel;
     }
 
@@ -295,28 +395,78 @@ public final class DesktopSyncApp extends JFrame {
         JPanel panel = cardPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
 
-        panel.add(sectionTitle("\u626b\u7801\u914d\u5bf9"));
-        panel.add(sectionHint("\u624b\u673a\u7aef\u70b9\u51fb\u201c\u626b\u7801\u914d\u5bf9\u201d\u540e\uff0c\u76f4\u63a5\u626b\u63cf\u8fd9\u4e2a\u4e8c\u7ef4\u7801\u5373\u53ef\u5199\u5165\u540c\u6b65\u5730\u5740\u3002"));
+        panel.add(sectionTitle("扫码配对"));
+        panel.add(sectionHint(
+            "手机端点击“扫码配对”后，直接扫描这个二维码即可写入同步地址。"
+        ));
         panel.add(Box.createVerticalStrut(12));
         panel.add(buildPairingQrPanel());
         panel.add(Box.createVerticalStrut(16));
-        panel.add(sectionTitle("\u5f85\u786e\u8ba4\u9884\u89c8"));
-        panel.add(sectionHint("\u53f3\u4fa7\u4f1a\u76f4\u63a5\u5c55\u793a outbox \u548c state \u63a5\u4e0b\u6765\u4f1a\u88ab\u624b\u673a\u7aef\u770b\u5230\u7684\u5185\u5bb9\u3002"));
+        panel.add(sectionTitle("待确认预览"));
+        panel.add(sectionHint(
+            "右侧会直接展示 outbox 和 state 接下来会被手机端看到的内容。"
+        ));
         panel.add(Box.createVerticalStrut(12));
-        panel.add(scrollPane(previewArea, 288));
+
+        previewScrollPane = new JScrollPane(previewArea);
+        previewScrollPane.setBorder(BorderFactory.createLineBorder(LINE));
+        previewScrollPane.getViewport().setBackground(PANEL_SOFT);
+        panel.add(previewScrollPane);
+
         panel.add(Box.createVerticalStrut(16));
-        panel.add(sectionTitle("\u8b66\u544a\u4e0e\u5f02\u5e38"));
+        panel.add(sectionTitle("警告与异常"));
         panel.add(Box.createVerticalStrut(8));
-        panel.add(scrollPane(warningsArea, 200));
+
+        warningsScrollPane = new JScrollPane(warningsArea);
+        warningsScrollPane.setBorder(BorderFactory.createLineBorder(LINE));
+        warningsScrollPane.getViewport().setBackground(PANEL_SOFT);
+        panel.add(warningsScrollPane);
+
         return panel;
     }
 
     private JPanel buildLogPanel() {
-        JPanel panel = cardPanel();
-        panel.setLayout(new BorderLayout(0, 10));
-        panel.add(sectionTitle("\u5b9e\u65f6\u65e5\u5fd7"), BorderLayout.NORTH);
-        panel.add(scrollPane(logArea, 180), BorderLayout.CENTER);
-        return panel;
+        logContentPanel = cardPanel();
+        logContentPanel.setLayout(new BorderLayout(0, 10));
+
+        logScrollPane = new JScrollPane(logArea);
+        logScrollPane.setBorder(BorderFactory.createLineBorder(LINE));
+        logScrollPane.getViewport().setBackground(PANEL_SOFT);
+        logContentPanel.add(logScrollPane, BorderLayout.CENTER);
+
+        return logContentPanel;
+    }
+
+    private JPanel buildSouthPanel() {
+        JPanel container = new JPanel(new BorderLayout());
+        container.setOpaque(false);
+
+        JPanel controlBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 4));
+        controlBar.setOpaque(false);
+
+        logToggleButton = new JButton("隐藏日志 ▲");
+        styleFlatButton(logToggleButton);
+        logToggleButton.setForeground(MUTED);
+        logToggleButton.setBackground(PANEL);
+        logToggleButton.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(LINE),
+            new EmptyBorder(6, 12, 6, 12)
+        ));
+        logToggleButton.addActionListener(e -> toggleLogPanel());
+
+        autoScrollCheckbox = new JCheckBox("自动滚动");
+        autoScrollCheckbox.setOpaque(false);
+        autoScrollCheckbox.setForeground(MUTED);
+        autoScrollCheckbox.setFont(uiFont(Font.PLAIN, 12));
+        autoScrollCheckbox.setSelected(true);
+
+        controlBar.add(logToggleButton);
+        controlBar.add(autoScrollCheckbox);
+
+        container.add(controlBar, BorderLayout.NORTH);
+        container.add(buildLogPanel(), BorderLayout.CENTER);
+
+        return container;
     }
 
     private JPanel buildPairingQrPanel() {
@@ -357,12 +507,12 @@ public final class DesktopSyncApp extends JFrame {
 
     private void runOneShotSync() {
         setBusy(scanButton, true);
-        appendLog("[\u76d1\u542c] \u624b\u52a8\u89e6\u53d1\u8fd1\u671f\u5207\u7247\u626b\u63cf...");
+        appendLog("[监听] 手动触发近期切片扫描...");
         new SwingWorker<Integer, String>() {
             @Override
             protected Integer doInBackground() throws Exception {
                 Process process = buildProcess(false).start();
-                return pumpProcess(process, "[\u626b\u63cf]");
+                return pumpProcess(process, "[扫描]");
             }
 
             @Override
@@ -370,9 +520,9 @@ public final class DesktopSyncApp extends JFrame {
                 setBusy(scanButton, false);
                 try {
                     int exitCode = get();
-                    appendLog("\u624b\u52a8\u626b\u63cf\u5b8c\u6210\uff0c\u9000\u51fa\u7801 " + exitCode + "\u3002");
+                    appendLog("手动扫描完成，退出码 " + exitCode + "。");
                 } catch (Exception exception) {
-                    appendLog("\u624b\u52a8\u626b\u63cf\u5931\u8d25\uff1a" + exception.getMessage());
+                    appendLog("手动扫描失败：" + exception.getMessage());
                     showError(exception.getMessage());
                 }
                 refreshSnapshot();
@@ -382,26 +532,26 @@ public final class DesktopSyncApp extends JFrame {
 
     private void startService() {
         if (embeddedSyncService != null && embeddedSyncService.isRunning()) {
-            appendLog("\u540c\u6b65\u670d\u52a1\u5df2\u5728\u8fd0\u884c\u3002");
+            appendLog("同步服务已在运行。");
             return;
         }
         try {
-            embeddedSyncService = new EmbeddedSyncService(this::currentServiceConfig, line -> appendLog("[\u670d\u52a1] " + line));
+            embeddedSyncService = new EmbeddedSyncService(this::currentServiceConfig, line -> appendLog("[服务] " + line));
             serviceStatusValue.setText(STATUS_STARTING);
             serviceStatusValue.setForeground(WARN);
-            watchStatusValue.setText("\u521d\u59cb\u5316\u4e2d");
+            watchStatusValue.setText("初始化中");
             watchStatusValue.setForeground(WARN);
-            appendLog("\u684c\u9762\u540c\u6b65\u670d\u52a1\u542f\u52a8\u4e2d...");
+            appendLog("桌面同步服务启动中...");
             embeddedSyncService.start();
             logRecommendedEndpoints();
             serviceStatusValue.setText(STATUS_RUNNING);
             serviceStatusValue.setForeground(SUCCESS);
             refreshWatchStatus();
         } catch (IOException exception) {
-            appendLog("\u542f\u52a8\u684c\u9762\u540c\u6b65\u670d\u52a1\u5931\u8d25\uff1a" + exception.getMessage());
+            appendLog("启动桌面同步服务失败：" + exception.getMessage());
             serviceStatusValue.setText(STATUS_ERROR);
             serviceStatusValue.setForeground(ERROR);
-            watchStatusValue.setText("\u542f\u52a8\u5931\u8d25");
+            watchStatusValue.setText("启动失败");
             watchStatusValue.setForeground(ERROR);
             embeddedSyncService = null;
             showError(exception.getMessage());
@@ -410,10 +560,10 @@ public final class DesktopSyncApp extends JFrame {
 
     private void stopService() {
         if (embeddedSyncService == null || !embeddedSyncService.isRunning()) {
-            appendLog("\u540c\u6b65\u670d\u52a1\u672a\u5728\u8fd0\u884c\u3002");
+            appendLog("同步服务未在运行。");
             return;
         }
-        appendLog("\u6b63\u5728\u505c\u6b62\u684c\u9762\u540c\u6b65\u670d\u52a1...");
+        appendLog("正在停止桌面同步服务...");
         embeddedSyncService.stop();
         embeddedSyncService = null;
         serviceStatusValue.setText(STATUS_STOPPING);
@@ -479,7 +629,7 @@ public final class DesktopSyncApp extends JFrame {
 
     private void refreshWatchStatus() {
         if (embeddedSyncService == null || !embeddedSyncService.isRunning()) {
-            watchStatusValue.setText("\u672a\u542f\u7528");
+            watchStatusValue.setText("未启用");
             watchStatusValue.setForeground(MUTED);
             return;
         }
@@ -534,7 +684,7 @@ public final class DesktopSyncApp extends JFrame {
             Files.createDirectories(path);
             Desktop.getDesktop().open(path.toFile());
         } catch (Exception exception) {
-            showError("\u65e0\u6cd5\u6253\u5f00\u76ee\u5f55\uff1a" + exception.getMessage());
+            showError("无法打开目录：" + exception.getMessage());
         }
     }
 
@@ -546,15 +696,15 @@ public final class DesktopSyncApp extends JFrame {
         EndpointSelection selection = resolveEndpointSelection();
         EndpointCandidate candidate = selection.primary();
         if (candidate == null) {
-            showError("\u5f53\u524d\u672a\u627e\u5230\u53ef\u590d\u5236\u7684\u63a8\u8350\u5730\u5740\u3002");
+            showError("当前未找到可复制的推荐地址。");
             return;
         }
         try {
             Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(candidate.url()), null);
             updateEndpointDisplay(selection);
-            appendLog("\u5df2\u590d\u5236" + candidate.label() + "\uff1a" + candidate.url());
+            appendLog("已复制" + candidate.label() + "：" + candidate.url());
         } catch (Exception exception) {
-            showError("\u590d\u5236\u5730\u5740\u5931\u8d25\uff1a" + exception.getMessage());
+            showError("复制地址失败：" + exception.getMessage());
         }
     }
 
@@ -564,44 +714,44 @@ public final class DesktopSyncApp extends JFrame {
         refreshPairingQr(selection);
         logRecommendedEndpoints(selection);
         if (selection.primary() != null) {
-            appendLog("\u63a8\u8350\u5730\u5740\u5df2\u5237\u65b0\uff1a" + selection.primary().url());
+            appendLog("推荐地址已刷新：" + selection.primary().url());
         }
     }
 
     private void updateEndpointDisplay(EndpointSelection selection) {
         if (selection == null || selection.primary() == null) {
-            endpointValue.setText("\u6682\u65e0\u53ef\u7528\u5730\u5740");
-            lanEndpointValue.setText("\u6682\u65e0\u53ef\u7528\u5730\u5740");
+            endpointValue.setText("暂无可用地址");
+            lanEndpointValue.setText("暂无可用地址");
             return;
         }
         endpointValue.setText(formatEndpointLabel(selection.primary()));
         if (selection.lan() != null) {
             lanEndpointValue.setText(formatEndpointLabel(selection.lan()));
         } else {
-            lanEndpointValue.setText("<html><div style='color:#9EADBF;line-height:1.3;'>\u6682\u65e0\u53ef\u7528\u7684\u5c40\u57df\u7f51\u5907\u7528\u5730\u5740</div></html>");
+            lanEndpointValue.setText("<html><div style='color:#9EADBF;line-height:1.3;'>暂无可用的局域网备用地址</div></html>");
         }
     }
 
     private String formatEndpointLabel(EndpointCandidate candidate) {
         boolean serviceRunning = embeddedSyncService != null && embeddedSyncService.isRunning();
         String reachText = serviceRunning
-            ? (candidate.reachable() ? "\u5df2\u901a\u8fc7\u68c0\u6d4b\u5b9e\u73b0\u53ef\u8fde\u63a5" : "\u6682\u672a\u7ecf\u8fc7\u8fde\u63a5\u68c0\u6d4b")
-            : "\u7b49\u5f85\u670d\u52a1\u5f00\u542f";
+            ? (candidate.reachable() ? "已通过检测实现可连接" : "暂未经过连接检测")
+            : "等待服务开启";
         return "<html><div style='line-height:1.3;max-width:260px;'><span style='font-size:11px;color:#9EADBF;'>" + candidate.label() + " · " + reachText + "</span><br><span style='font-size:13px;'>" + candidate.url() + "</span></div></html>";
     }
 
     private void refreshPairingQr(EndpointSelection selection) {
         if (embeddedSyncService == null || !embeddedSyncService.isRunning()) {
             pairingQrLabel.setIcon(null);
-            pairingQrLabel.setText("\u8bf7\u5148\u542f\u52a8\u670d\u52a1");
-            pairingQrHint.setText("\u542f\u52a8\u670d\u52a1\u540e\uff0c\u4f1a\u81ea\u52a8\u751f\u6210\u5f53\u524d\u63a8\u8350\u5730\u5740\u7684\u4e8c\u7ef4\u7801");
+            pairingQrLabel.setText("请先启动服务");
+            pairingQrHint.setText("启动服务后，会自动生成当前推荐地址的二维码");
             return;
         }
 
         if (selection == null || selection.primary() == null) {
             pairingQrLabel.setIcon(null);
-            pairingQrLabel.setText("\u672a\u627e\u5230\u53ef\u914d\u5bf9\u5730\u5740");
-            pairingQrHint.setText("\u8bf7\u7a0d\u540e\u5237\u65b0\uff0c\u6216\u6539\u7528\u624b\u52a8\u8f93\u5165\u540c\u6b65\u5730\u5740");
+            pairingQrLabel.setText("未找到可配对地址");
+            pairingQrHint.setText("请稍后刷新，或改用手动输入同步地址");
             return;
         }
 
@@ -611,18 +761,18 @@ public final class DesktopSyncApp extends JFrame {
             pairingQrLabel.setText("");
             if (selection.lan() != null) {
                 pairingQrHint.setText(
-                    "\u5f53\u524d\u4e8c\u7ef4\u7801\u5185\u5bb9\uff08\u4e3b\u63a8\u8350\uff09\uff1a" +
+                    "当前二维码内容（主推荐）：" +
                     candidate.url() +
-                    "\u3002\u540c\u4e00 Wi\u2011Fi \u5907\u7528\uff1a" +
+                    "。同一 Wi‑Fi 备用：" +
                     selection.lan().url()
                 );
             } else {
-                pairingQrHint.setText("\u5f53\u524d\u4e8c\u7ef4\u7801\u5185\u5bb9\uff08\u4e3b\u63a8\u8350\uff09\uff1a" + candidate.url());
+                pairingQrHint.setText("当前二维码内容（主推荐）：" + candidate.url());
             }
         } catch (WriterException exception) {
             pairingQrLabel.setIcon(null);
-            pairingQrLabel.setText("\u4e8c\u7ef4\u7801\u751f\u6210\u5931\u8d25");
-            pairingQrHint.setText("\u8bf7\u5148\u590d\u5236\u63a8\u8350\u5730\u5740\u624b\u52a8\u7c98\u8d34\u5230\u624b\u673a\uff1a" + candidate.url());
+            pairingQrLabel.setText("二维码生成失败");
+            pairingQrHint.setText("请先复制推荐地址手动粘贴到手机：" + candidate.url());
         }
     }
 
@@ -635,15 +785,50 @@ public final class DesktopSyncApp extends JFrame {
         SwingUtilities.invokeLater(() -> {
             String timestamp = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new java.util.Date());
             logArea.append("[" + timestamp + "] " + line + System.lineSeparator());
-            logArea.setCaretPosition(logArea.getDocument().getLength());
+            if (autoScrollCheckbox == null || autoScrollCheckbox.isSelected()) {
+                logArea.setCaretPosition(logArea.getDocument().getLength());
+            }
         });
+    }
+
+    private void adjustResponsiveSizes() {
+        int frameHeight = getHeight();
+        if (frameHeight <= 0) {
+            return;
+        }
+
+        int previewHeight = Math.max(100, (int) (frameHeight * 0.35));
+        int warningsHeight = Math.max(60, (int) (frameHeight * 0.25));
+        int logHeight = logPanelCollapsed ? 0 : Math.max(60, (int) (frameHeight * 0.20));
+
+        if (previewScrollPane != null) {
+            previewScrollPane.setPreferredSize(new Dimension(previewScrollPane.getWidth(), previewHeight));
+        }
+        if (warningsScrollPane != null) {
+            warningsScrollPane.setPreferredSize(new Dimension(warningsScrollPane.getWidth(), warningsHeight));
+        }
+        if (logScrollPane != null) {
+            logScrollPane.setPreferredSize(new Dimension(logScrollPane.getWidth(), logHeight));
+        }
+        if (logContentPanel != null) {
+            logContentPanel.setVisible(!logPanelCollapsed);
+        }
+
+        revalidate();
+        repaint();
+    }
+
+    private void toggleLogPanel() {
+        logPanelCollapsed = !logPanelCollapsed;
+        logToggleButton.setText(logPanelCollapsed ? "显示日志 ▼" : "隐藏日志 ▲");
+        adjustResponsiveSizes();
     }
 
     private void shutdown() {
         if (embeddedSyncService != null && embeddedSyncService.isRunning()) {
             int result = JOptionPane.showConfirmDialog(
                 this,
-                "\u684c\u9762\u540c\u6b65\u670d\u52a1\u4ecd\u5728\u8fd0\u884c\uff0c\u662f\u5426\u5148\u505c\u6b62\u670d\u52a1\u518d\u5173\u95ed\u5e94\u7528\uff1f",
+                "桌面同步服务仍在运行，是否先停止服务再关闭应用？",
                 APP_TITLE,
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE
@@ -1010,11 +1195,11 @@ public final class DesktopSyncApp extends JFrame {
                     EndpointKind kind = determineEndpointKind(network, address);
                     String label;
                     if (kind == EndpointKind.TAILSCALE) {
-                        label = "\u63a8\u8350\u4f7f\u7528\uff08Tailscale/MagicDNS\uff09";
+                        label = "推荐使用（Tailscale/MagicDNS）";
                     } else if (kind == EndpointKind.LAN) {
-                        label = "\u5c40\u57df\u7f51\u517c\u5bb9\u5730\u5740";
+                        label = "局域网兼容地址";
                     } else {
-                        label = "\u5176\u4ed6\u53ef\u7528\u7f51\u7edc\u5730\u5740";
+                        label = "其他可用网络地址";
                     }
                     candidates.add(new EndpointCandidate(label, "http://" + ip + ":" + port, score, kind, false));
                 }
@@ -1025,7 +1210,7 @@ public final class DesktopSyncApp extends JFrame {
             }
         } catch (Exception ignored) {
         }
-        return List.of(new EndpointCandidate("\u5f53\u524d\u53ef\u7528\u5730\u5740", "http://127.0.0.1:" + safeText(portField.getText(), "8823"), 0, EndpointKind.OTHER, false));
+        return List.of(new EndpointCandidate("当前可用地址", "http://127.0.0.1:" + safeText(portField.getText(), "8823"), 0, EndpointKind.OTHER, false));
     }
 
     private static int scoreInterface(NetworkInterface network, InetAddress address) throws Exception {
@@ -1172,16 +1357,16 @@ public final class DesktopSyncApp extends JFrame {
 
     private void logRecommendedEndpoints(EndpointSelection selection) {
         if (selection == null || selection.primary() == null) {
-            appendLog("\u672a\u627e\u5230\u53ef\u7528\u5730\u5740\uff0c\u8bf7\u7a0d\u540e\u5237\u65b0\u3002");
+            appendLog("未找到可用地址，请稍后刷新。");
             return;
         }
         EndpointCandidate primary = selection.primary();
-        appendLog("\u4e3b\u63a8\u8350\uff1a" + primary.label() + "\uff1a" + primary.url());
+        appendLog("主推荐：" + primary.label() + "：" + primary.url());
         if (selection.lan() != null) {
             EndpointCandidate lan = selection.lan();
-            appendLog("\u5c40\u57df\u7f51\u5907\u7528\uff1a" + lan.label() + "\uff1a" + lan.url());
+            appendLog("局域网备用：" + lan.label() + "：" + lan.url());
         } else {
-            appendLog("\u5c40\u57df\u7f51\u5907\u7528\uff1a\u6682\u65e0\u53ef\u7528\u5730\u5740");
+            appendLog("局域网备用：暂无可用地址");
         }
     }
 
@@ -1236,8 +1421,38 @@ public final class DesktopSyncApp extends JFrame {
         button.setContentAreaFilled(true);
         button.setBorderPainted(true);
         button.setFocusPainted(false);
-        button.setRolloverEnabled(false);
+        button.setRolloverEnabled(true);
         button.setMargin(new Insets(9, 16, 9, 16));
+        addHoverEffect(button);
+    }
+
+    private static void addHoverEffect(JButton button) {
+        button.addMouseListener(new MouseAdapter() {
+            private Color savedBg;
+
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                if (button.isEnabled()) {
+                    savedBg = button.getBackground();
+                    button.setBackground(brightenColor(savedBg, 0.15f));
+                }
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                if (savedBg != null) {
+                    button.setBackground(savedBg);
+                    savedBg = null;
+                }
+            }
+        });
+    }
+
+    private static Color brightenColor(Color color, float factor) {
+        int r = Math.min(255, (int) (color.getRed() * (1 + factor)));
+        int g = Math.min(255, (int) (color.getGreen() * (1 + factor)));
+        int b = Math.min(255, (int) (color.getBlue() * (1 + factor)));
+        return new Color(r, g, b);
     }
 
     private static void tonePrimaryButton(JButton button, Color color) {
@@ -1284,11 +1499,11 @@ public final class DesktopSyncApp extends JFrame {
             List<String> warnings = extractStringArray(state, "warnings");
             String preview = buildPreview(jobs);
             String warningText = warnings.isEmpty()
-                ? "\u6682\u65e0\u8b66\u544a\u3002"
+                ? "暂无警告。"
                 : String.join(System.lineSeparator(), warnings);
             Long updatedAt = extractLong(state, "updatedAt");
             String lastSync = updatedAt == null
-                ? "\u5c1a\u672a\u540c\u6b65"
+                ? "尚未同步"
                 : TIME_FORMAT.format(Instant.ofEpochMilli(updatedAt));
 
             return new Snapshot(
@@ -1353,21 +1568,21 @@ public final class DesktopSyncApp extends JFrame {
 
         private static String buildPreview(List<String> jobs) {
             if (jobs.isEmpty()) {
-                return "\u6682\u65e0\u5f85\u5904\u7406\u8349\u7a3f\u3002\u670d\u52a1\u8fd0\u884c\u540e\uff0c\u624b\u673a\u53ef\u62c9\u53d6\u7684\u7ed3\u679c\u4f1a\u663e\u793a\u5728\u8fd9\u91cc\u3002";
+                return "暂无待处理草稿。服务运行后，手机可拉取的结果会显示在这里。";
             }
             StringBuilder builder = new StringBuilder();
             for (String job : jobs) {
-                builder.append("\u6a21\u578b\uff1a")
+                builder.append("模型：")
                     .append(Objects.toString(extractString(job, "modelName"), "-"))
                     .append(System.lineSeparator());
-                builder.append("\u7528\u91cf\uff1a")
+                builder.append("用量：")
                     .append(Objects.toString(extractLong(job, "estimatedUsageGrams"), "0"))
                     .append("g")
                     .append(System.lineSeparator());
-                builder.append("\u6750\u6599\uff1a")
-                    .append(Objects.toString(extractString(job, "targetMaterial"), "\u672a\u6307\u5b9a"))
+                builder.append("材料：")
+                    .append(Objects.toString(extractString(job, "targetMaterial"), "未指定"))
                     .append(System.lineSeparator());
-                builder.append("\u4efb\u52a1 ID\uff1a")
+                builder.append("任务 ID：")
                     .append(Objects.toString(extractString(job, "externalJobId"), "-"))
                     .append(System.lineSeparator())
                     .append(System.lineSeparator());

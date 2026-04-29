@@ -1,1 +1,11 @@
-﻿[]
+﻿[
+{
+    "externalJobId":  "bambu-gcode-1692-1",
+    "source":  "DESKTOP_AGENT",
+    "modelName":  "浅浅丘（歪头）MW",
+    "estimatedUsageGrams":  147,
+    "targetMaterial":  "PETG Basic",
+    "note":  "来自 Bambu Studio 切片文件 .1692.1.gcode",
+    "createdAt":  1777348390985
+}
+]

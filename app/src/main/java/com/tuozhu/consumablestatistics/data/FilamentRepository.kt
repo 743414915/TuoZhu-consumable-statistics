@@ -222,6 +222,13 @@ class FilamentRepository(
         }
     }
 
+    suspend fun deletePrintJob(jobId: Long): Boolean {
+        val job = dao.getPrintJobById(jobId) ?: return false
+        if (job.status != PrintJobStatus.DRAFT) return false
+        dao.deletePrintJob(jobId)
+        return true
+    }
+
     suspend fun confirmPrintJob(jobId: Long, targetRollId: Long? = null): PrintJobConfirmationResult {
         val job = dao.getPrintJobById(jobId)
             ?: return PrintJobConfirmationResult(false, "打印任务不存在")
@@ -247,6 +254,8 @@ class FilamentRepository(
         }
 
         val now = System.currentTimeMillis()
+        var localFailureMessage: String? = null
+        var confirmationReceipt: SyncConfirmationReceipt? = null
         val currentRemaining = calculateRemaining(roll)
         if (currentRemaining < job.estimatedUsageGrams) {
             return PrintJobConfirmationResult(
@@ -255,38 +264,66 @@ class FilamentRepository(
             )
         }
 
-        val updatedRemaining = currentRemaining - job.estimatedUsageGrams
         var confirmedNow = false
         inTransaction {
+            val latestJob = dao.getPrintJobById(jobId)
+            if (latestJob == null) {
+                localFailureMessage = "鎵撳嵃浠诲姟涓嶅瓨鍦?"
+                return@inTransaction
+            }
+            val latestRoll = dao.getRollById(rollId)
+            if (latestRoll == null) {
+                localFailureMessage = "鐩爣鑰楁潗鍗蜂笉瀛樺湪"
+                return@inTransaction
+            }
+            if (latestRoll.isArchivedRoll()) {
+                localFailureMessage = "鐩爣鑰楁潗鍗峰凡鍒犻櫎锛岃閲嶆柊閫夋嫨娲诲姩鍗?"
+                return@inTransaction
+            }
+            if (latestJob.status == PrintJobStatus.CONFIRMED ||
+                dao.countPrintUsageEventsByExternalJobId(latestJob.externalJobId) > 0
+            ) {
+                dao.markPrintJobConfirmedIfDraft(jobId, rollId, latestJob.confirmedAt ?: now)
+                return@inTransaction
+            }
+
+            val refreshedRemaining = calculateRemaining(latestRoll)
+            if (refreshedRemaining < latestJob.estimatedUsageGrams) {
+                localFailureMessage = "褰撳墠娲诲姩鍗蜂粎鍓?${refreshedRemaining}g锛屼笉瓒充互鎵ｅ噺 ${latestJob.estimatedUsageGrams}g"
+                return@inTransaction
+            }
+            val updatedRemaining = refreshedRemaining - latestJob.estimatedUsageGrams
             confirmedNow = dao.markPrintJobConfirmedIfDraft(jobId, rollId, now) == 1
             if (confirmedNow) {
-                dao.updateRoll(roll.copy(updatedAt = now))
+                dao.updateRoll(latestRoll.copy(updatedAt = now))
                 dao.insertEvent(
                     FilamentEventEntity(
                         rollId = rollId,
                         type = FilamentEventType.PRINT_USAGE,
-                        source = job.source,
-                        deltaGrams = updatedRemaining - currentRemaining,
+                        source = latestJob.source,
+                        deltaGrams = updatedRemaining - refreshedRemaining,
                         remainingAfterGrams = updatedRemaining,
                         note = job.note.ifBlank { "确认打印任务" },
-                        externalJobId = job.externalJobId,
+                        externalJobId = latestJob.externalJobId,
                         createdAt = now,
                     ),
+                )
+                confirmationReceipt = SyncConfirmationReceipt(
+                    externalJobId = latestJob.externalJobId,
+                    confirmedAt = now,
+                    targetRollId = rollId,
                 )
             }
         }
 
+        if (localFailureMessage != null) {
+            return PrintJobConfirmationResult(false, localFailureMessage!!)
+        }
         if (!confirmedNow) {
             return PrintJobConfirmationResult(true, "该任务已确认，无需重复处理")
         }
 
-        val pushResult = syncCoordinator.pushConfirmation(
-            SyncConfirmationReceipt(
-                externalJobId = job.externalJobId,
-                confirmedAt = now,
-                targetRollId = rollId,
-            ),
-        )
+        val pushResult = syncCoordinator.pushConfirmation(confirmationReceipt!!)
         dao.upsertSyncState(
             SyncStateEntity(
                 status = pushResult.status,
@@ -357,6 +394,93 @@ class FilamentRepository(
 
     private suspend fun inTransaction(block: suspend () -> Unit) {
         runInTransaction(block)
+    }
+
+    suspend fun buildExportJson(): String {
+        val rolls = dao.getAllNonArchivedRolls()
+        val eventsByRoll = rolls.associate { roll ->
+            roll.id to dao.getEventsForRoll(roll.id)
+        }
+        val printJobs = dao.getAllConfirmedPrintJobs()
+        return DataExportImport.toExportJson(rolls, eventsByRoll, printJobs)
+    }
+
+    suspend fun importFromJson(json: String): ImportResult {
+        val importData = DataExportImport.parseImportJson(json)
+            ?: return ImportResult(0, 0)
+
+        var rollCount = 0
+        var printJobCount = 0
+
+        inTransaction {
+            val now = System.currentTimeMillis()
+            var lastActiveRollId: Long? = null
+
+            importData.rolls.forEach { exportedRoll ->
+                val rollId = dao.insertRoll(
+                    FilamentRollEntity(
+                        brand = exportedRoll.brand,
+                        name = exportedRoll.name,
+                        material = exportedRoll.material,
+                        colorName = exportedRoll.colorName,
+                        colorHex = exportedRoll.colorHex,
+                        initialWeightGrams = exportedRoll.initialWeightGrams,
+                        lowStockThresholdGrams = exportedRoll.lowStockThresholdGrams,
+                        lastCalibrationWeightGrams = exportedRoll.lastCalibrationWeightGrams,
+                        lastCalibrationAt = exportedRoll.lastCalibrationAt,
+                        isActive = exportedRoll.isActive,
+                        notes = exportedRoll.notes,
+                        createdAt = exportedRoll.createdAt,
+                        updatedAt = now,
+                    ),
+                )
+                if (exportedRoll.isActive) {
+                    lastActiveRollId = rollId
+                }
+                exportedRoll.events.forEach { exportedEvent ->
+                    dao.insertEvent(
+                        FilamentEventEntity(
+                            rollId = rollId,
+                            type = exportedEvent.type,
+                            source = exportedEvent.source,
+                            deltaGrams = exportedEvent.deltaGrams,
+                            remainingAfterGrams = exportedEvent.remainingAfterGrams,
+                            note = exportedEvent.note,
+                            externalJobId = exportedEvent.externalJobId,
+                            createdAt = exportedEvent.createdAt,
+                        ),
+                    )
+                }
+                rollCount++
+            }
+
+            if (lastActiveRollId != null) {
+                dao.setActiveRollInternal(lastActiveRollId!!, now)
+            }
+
+            importData.printJobs.forEach { exportedJob ->
+                val existing = dao.getPrintJobByExternalId(exportedJob.externalJobId)
+                if (existing == null) {
+                    dao.insertPrintJob(
+                        PrintJobEntity(
+                            externalJobId = exportedJob.externalJobId,
+                            source = exportedJob.source,
+                            modelName = exportedJob.modelName,
+                            estimatedUsageGrams = exportedJob.estimatedUsageGrams,
+                            targetMaterial = exportedJob.targetMaterial,
+                            status = exportedJob.status,
+                            rollId = null,
+                            note = exportedJob.note,
+                            createdAt = exportedJob.createdAt,
+                            confirmedAt = exportedJob.confirmedAt,
+                        ),
+                    )
+                    printJobCount++
+                }
+            }
+        }
+
+        return ImportResult(rollCount = rollCount, printJobCount = printJobCount)
     }
 
     private fun archiveRollNotes(notes: String): String {

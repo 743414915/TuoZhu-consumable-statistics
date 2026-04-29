@@ -213,6 +213,24 @@ function Resolve-BambuModelName {
         }
     }
 
+    $gcodeDir = Split-Path -Parent $Path
+    if ($gcodeDir) {
+        $cacheDir = Split-Path -Parent $gcodeDir
+        if ($cacheDir) {
+            $originPath = Join-Path $cacheDir "origin.txt"
+            if (Test-Path -LiteralPath $originPath) {
+                $originContent = Get-Content -LiteralPath $originPath -Raw -Encoding UTF8
+                $originContent = $originContent.Trim()
+                if ($originContent) {
+                    $originFileName = [System.IO.Path]::GetFileNameWithoutExtension($originContent)
+                    if (-not [string]::IsNullOrWhiteSpace($originFileName)) {
+                        return $originFileName.Trim()
+                    }
+                }
+            }
+        }
+    }
+
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($Path).Trim(".")
     if (-not [string]::IsNullOrWhiteSpace($baseName)) {
         return $baseName

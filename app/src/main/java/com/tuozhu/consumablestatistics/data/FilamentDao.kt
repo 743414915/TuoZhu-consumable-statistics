@@ -55,6 +55,9 @@ interface FilamentDao {
     @Query("SELECT COALESCE(SUM(deltaGrams), 0) FROM filament_events WHERE rollId = :rollId AND createdAt > :afterTime")
     suspend fun sumDeltaAfter(rollId: Long, afterTime: Long): Int
 
+    @Query("SELECT COUNT(*) FROM filament_events WHERE type = 'PRINT_USAGE' AND externalJobId = :externalJobId")
+    suspend fun countPrintUsageEventsByExternalJobId(externalJobId: String): Int
+
     @Query("UPDATE filament_rolls SET isActive = CASE WHEN id = :rollId AND notes NOT LIKE '[[ARCHIVED]]%' THEN 1 ELSE 0 END, updatedAt = :updatedAt")
     suspend fun setActiveRollInternal(rollId: Long, updatedAt: Long)
 
@@ -82,11 +85,23 @@ interface FilamentDao {
     @Update
     suspend fun updatePrintJob(job: PrintJobEntity)
 
+    @Query("DELETE FROM print_jobs WHERE id = :jobId")
+    suspend fun deletePrintJob(jobId: Long)
+
     @Query("DELETE FROM print_jobs WHERE status = 'DRAFT'")
     suspend fun deleteAllDraftPrintJobs()
 
     @Query("DELETE FROM print_jobs WHERE status = 'DRAFT' AND externalJobId NOT IN (:externalJobIds)")
     suspend fun deleteDraftPrintJobsNotIn(externalJobIds: List<String>)
+
+    @Query("SELECT * FROM filament_rolls WHERE notes NOT LIKE '[[ARCHIVED]]%'")
+    suspend fun getAllNonArchivedRolls(): List<FilamentRollEntity>
+
+    @Query("SELECT * FROM filament_events WHERE rollId = :rollId ORDER BY createdAt ASC, id ASC")
+    suspend fun getEventsForRoll(rollId: Long): List<FilamentEventEntity>
+
+    @Query("SELECT * FROM print_jobs WHERE status = 'CONFIRMED' ORDER BY confirmedAt ASC, id ASC")
+    suspend fun getAllConfirmedPrintJobs(): List<PrintJobEntity>
 
     @Transaction
     suspend fun updateRollAndInsertEvent(roll: FilamentRollEntity, event: FilamentEventEntity) {

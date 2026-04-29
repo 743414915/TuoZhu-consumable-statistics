@@ -1,0 +1,16 @@
+appId: com.tuozhu.desktop-sync
+productName: TuoZhuDesktopSync
+directories:
+  output: ../dist-electron
+files:
+  - dist
+  - dist-electron
+  - ../desktop-agent/**/*
+extraResources:
+  - from: ../desktop-agent
+    to: desktop-agent
+win:
+  target: portable
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

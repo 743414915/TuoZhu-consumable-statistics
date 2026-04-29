@@ -10,7 +10,14 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +30,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -44,6 +52,7 @@ import androidx.compose.material.icons.outlined.Scale
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -61,7 +70,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -99,6 +112,9 @@ import com.tuozhu.consumablestatistics.ui.theme.SignalRed
 import com.tuozhu.consumablestatistics.ui.theme.SuccessMint
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
 private enum class ConsumableRootPage(
@@ -113,13 +129,14 @@ private enum class ConsumableRootPage(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConsumableApp(viewModel: ConsumableViewModel) {
+private fun LegacyConsumableApp(viewModel: ConsumableViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var addDialogVisible by rememberSaveable { mutableStateOf(false) }
     var consumeRollId by rememberSaveable { mutableLongStateOf(-1L) }
     var adjustRollId by rememberSaveable { mutableLongStateOf(-1L) }
     var deleteRollId by rememberSaveable { mutableLongStateOf(-1L) }
+    var deleteJobId by rememberSaveable { mutableLongStateOf(-1L) }
     var shelfExpandedOverride by rememberSaveable { mutableStateOf<Boolean?>(null) }
 
     val shelfRolls = if (state.activeRoll == null) state.rolls else state.rolls.filterNot { it.id == state.activeRoll?.id }
@@ -197,6 +214,7 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
                             jobs = state.pendingPrintJobs,
                             activeRoll = state.activeRoll,
                             onConfirmJob = viewModel::confirmPrintJob,
+                            onDeleteJob = { deleteJobId = it },
                         )
                     }
                 }
@@ -255,12 +273,15 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
 
     val consumeRoll = state.rolls.firstOrNull { it.id == consumeRollId }
     if (consumeRoll != null) {
-        WeightChangeDialog(
+        RefinedWeightChangeDialog(
             title = "登记耗材",
             confirmLabel = "保存",
             description = "记录本次打印大约消耗的克重，用于维持库存估算。",
             rollName = consumeRoll.displayName,
             initialValue = "",
+            valueLabel = "本次补记消耗（g）",
+            valueSupportingText = "请输入大于 0 的克重。",
+            noteSupportingText = "可选，例如：补录旧任务、试打件、失败件。",
             onDismiss = { consumeRollId = -1L },
             onConfirm = { grams, note ->
                 viewModel.consumeRoll(consumeRoll.id, grams, note)
@@ -271,12 +292,15 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
 
     val adjustRoll = state.rolls.firstOrNull { it.id == adjustRollId }
     if (adjustRoll != null) {
-        WeightChangeDialog(
+        RefinedWeightChangeDialog(
             title = "校准余量",
             confirmLabel = "校准",
             description = "输入你刚刚实际称到的剩余克重，系统会把它作为新的基准值。",
             rollName = adjustRoll.displayName,
             initialValue = adjustRoll.estimatedRemainingGrams.toString(),
+            valueLabel = "当前实称重量（g）",
+            valueSupportingText = "可输入 0g，表示这卷已经用完。",
+            noteSupportingText = "可选，例如：重新复核、刚换秤。",
             allowZero = true,
             onDismiss = { adjustRollId = -1L },
             onConfirm = { grams, note ->
@@ -288,7 +312,7 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
 
     val deleteRoll = state.rolls.firstOrNull { it.id == deleteRollId }
     if (deleteRoll != null) {
-        DeleteRollDialog(
+        ArchiveRollDialog(
             rollName = deleteRoll.displayName,
             isActive = deleteRoll.isActive,
             onDismiss = { deleteRollId = -1L },
@@ -298,6 +322,23 @@ fun ConsumableApp(viewModel: ConsumableViewModel) {
             },
         )
     }
+
+    val deleteJob = state.pendingPrintJobs.firstOrNull { it.id == deleteJobId }
+    if (deleteJob != null) {
+        DeletePendingJobDialog(
+            jobModelName = deleteJob.modelName,
+            onDismiss = { deleteJobId = -1L },
+            onConfirm = {
+                viewModel.deletePendingPrintJob(deleteJob.id)
+                deleteJobId = -1L
+            },
+        )
+    }
+}
+
+@Composable
+fun ConsumableApp(viewModel: ConsumableViewModel) {
+    ConsumableWorkspaceApp(viewModel = viewModel)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -309,13 +350,65 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
     var consumeRollId by rememberSaveable { mutableLongStateOf(-1L) }
     var adjustRollId by rememberSaveable { mutableLongStateOf(-1L) }
     var deleteRollId by rememberSaveable { mutableLongStateOf(-1L) }
+    var deleteJobId by rememberSaveable { mutableLongStateOf(-1L) }
     var shelfExpandedOverride by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    var archivedExpandedOverride by rememberSaveable { mutableStateOf(false) }
     var currentPage by rememberSaveable { mutableStateOf(ConsumableRootPage.OVERVIEW) }
 
     val shelfRolls = if (state.activeRoll == null) state.rolls else state.rolls.filterNot { it.id == state.activeRoll?.id }
     val allowShelfCollapse = shelfRolls.size > 2
     val shelfExpanded = if (allowShelfCollapse) shelfExpandedOverride ?: false else true
+    val archivedExpanded = if (state.archivedRolls.size > 1) archivedExpandedOverride else true
     val showAddFab = currentPage == ConsumableRootPage.OVERVIEW || currentPage == ConsumableRootPage.INVENTORY
+
+    val context = LocalContext.current
+    val exportJson by viewModel.observeExportJson().collectAsStateWithLifecycle()
+    val importPreview by viewModel.observeImportPreview().collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.observeIsRefreshing().collectAsStateWithLifecycle()
+    var pendingExportJson by remember { mutableStateOf<String?>(null) }
+
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null && pendingExportJson != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(pendingExportJson!!.toByteArray(Charsets.UTF_8))
+                }
+                viewModel.clearExportData()
+                pendingExportJson = null
+                Toast.makeText(context, "数据导出成功", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "导出失败：${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val openDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val json = context.contentResolver.openInputStream(uri)?.use { input ->
+                    input.bufferedReader(Charsets.UTF_8).readText()
+                }
+                if (json.isNullOrBlank()) {
+                    Toast.makeText(context, "无法读取文件内容", Toast.LENGTH_SHORT).show()
+                } else {
+                    viewModel.prepareImport(json)
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "读取文件失败：${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    LaunchedEffect(exportJson) {
+        val json = exportJson ?: return@LaunchedEffect
+        pendingExportJson = json
+        val dateStr = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
+        createDocumentLauncher.launch("tuozhu-backup-$dateStr.json")
+    }
 
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
@@ -367,45 +460,67 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
                 )
             },
         ) { innerPadding ->
-            when (currentPage) {
-                ConsumableRootPage.OVERVIEW -> OverviewPage(
-                    state = state,
-                    modifier = Modifier.padding(innerPadding),
-                    onOpenSync = { currentPage = ConsumableRootPage.SYNC },
-                    onOpenHistory = { currentPage = ConsumableRootPage.HISTORY },
-                    onConsumeClick = { consumeRollId = it },
-                    onAdjustClick = { adjustRollId = it },
-                    onDeleteClick = { deleteRollId = it },
-                )
-                ConsumableRootPage.INVENTORY -> InventoryPage(
-                    state = state,
-                    shelfRolls = shelfRolls,
-                    shelfExpanded = shelfExpanded,
-                    allowShelfCollapse = allowShelfCollapse,
-                    modifier = Modifier.padding(innerPadding),
-                    onToggleShelfExpanded = {
-                        if (allowShelfCollapse) {
-                            shelfExpandedOverride = !shelfExpanded
-                        }
-                    },
-                    onConsumeClick = { consumeRollId = it },
-                    onAdjustClick = { adjustRollId = it },
-                    onDeleteClick = { deleteRollId = it },
-                    onSetActiveClick = viewModel::setActiveRoll,
-                )
-                ConsumableRootPage.SYNC -> SyncPage(
-                    state = state,
-                    modifier = Modifier.padding(innerPadding),
-                    onSaveEndpoint = viewModel::saveDesktopSyncAddress,
-                    onPullSync = viewModel::pullSync,
-                    onDiscoverLan = viewModel::autoDiscoverLanDesktop,
-                    onScanPairing = viewModel::pairWithScannedDesktopAddress,
-                    onConfirmJob = viewModel::confirmPrintJob,
-                )
-                ConsumableRootPage.HISTORY -> HistoryPage(
-                    state = state,
-                    modifier = Modifier.padding(innerPadding),
-                )
+            AnimatedContent(
+                targetState = currentPage,
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                    (slideInHorizontally(animationSpec = tween(280)) { width -> direction * width / 6 } + fadeIn(animationSpec = tween(200))) togetherWith
+                        (slideOutHorizontally(animationSpec = tween(280)) { width -> -direction * width / 6 } + fadeOut(animationSpec = tween(200)))
+                },
+                label = "page-transition",
+            ) { page ->
+                when (page) {
+                    ConsumableRootPage.OVERVIEW -> OverviewPage(
+                        state = state,
+                        modifier = Modifier.padding(innerPadding),
+                        onOpenSync = { currentPage = ConsumableRootPage.SYNC },
+                        onOpenHistory = { currentPage = ConsumableRootPage.HISTORY },
+                        onConsumeClick = { consumeRollId = it },
+                        onAdjustClick = { adjustRollId = it },
+                        onDeleteClick = { deleteRollId = it },
+                    )
+                    ConsumableRootPage.INVENTORY -> InventoryPage(
+                        state = state,
+                        shelfRolls = shelfRolls,
+                        shelfExpanded = shelfExpanded,
+                        allowShelfCollapse = allowShelfCollapse,
+                        archivedExpanded = archivedExpanded,
+                        modifier = Modifier.padding(innerPadding),
+                        onToggleShelfExpanded = {
+                            if (allowShelfCollapse) {
+                                shelfExpandedOverride = !shelfExpanded
+                            }
+                        },
+                        onToggleArchivedExpanded = {
+                            if (state.archivedRolls.size > 1) {
+                                archivedExpandedOverride = !archivedExpanded
+                            }
+                        },
+                        onConsumeClick = { consumeRollId = it },
+                        onAdjustClick = { adjustRollId = it },
+                        onDeleteClick = { deleteRollId = it },
+                        onSetActiveClick = viewModel::setActiveRoll,
+                        onExport = viewModel::prepareExport,
+                        onImport = { openDocumentLauncher.launch(arrayOf("application/json")) },
+                    )
+                    ConsumableRootPage.SYNC -> SyncPage(
+                        state = state,
+                        modifier = Modifier.padding(innerPadding),
+                        onSaveEndpoint = viewModel::saveDesktopSyncAddress,
+                        onPullSync = viewModel::pullSync,
+                        onDiscoverLan = viewModel::autoDiscoverLanDesktop,
+                        onScanPairing = viewModel::pairWithScannedDesktopAddress,
+                        onConfirmJob = viewModel::confirmPrintJob,
+                        onDeleteJob = { deleteJobId = it },
+                        isRefreshing = isRefreshing,
+                        onRefresh = viewModel::pullSync,
+                    )
+                    ConsumableRootPage.HISTORY -> HistoryPage(
+                        state = state,
+                        modifier = Modifier.padding(innerPadding),
+                    )
+                }
             }
         }
     }
@@ -422,7 +537,7 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
 
     val consumeRoll = state.rolls.firstOrNull { it.id == consumeRollId }
     if (consumeRoll != null) {
-        WeightChangeDialog(
+        RefinedWeightChangeDialog(
             title = "记录耗材",
             confirmLabel = "保存",
             description = "记录本次打印大约消耗的克重，用于维持库存估算。",
@@ -438,7 +553,7 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
 
     val adjustRoll = state.rolls.firstOrNull { it.id == adjustRollId }
     if (adjustRoll != null) {
-        WeightChangeDialog(
+        RefinedWeightChangeDialog(
             title = "校准余量",
             confirmLabel = "校准",
             description = "输入你刚刚实际称到的剩余克重，系统会把它作为新的基准值。",
@@ -455,13 +570,34 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
 
     val deleteRoll = state.rolls.firstOrNull { it.id == deleteRollId }
     if (deleteRoll != null) {
-        DeleteRollDialog(
+        ArchiveRollDialog(
             rollName = deleteRoll.displayName,
             isActive = deleteRoll.isActive,
             onDismiss = { deleteRollId = -1L },
             onConfirm = {
                 viewModel.deleteRoll(deleteRoll.id)
                 deleteRollId = -1L
+            },
+        )
+    }
+
+    importPreview?.let { preview ->
+        ImportPreviewDialog(
+            rollCount = preview.rollCount,
+            printJobCount = preview.printJobCount,
+            onDismiss = viewModel::cancelImport,
+            onConfirm = viewModel::confirmImport,
+        )
+    }
+
+    val deleteJob = state.pendingPrintJobs.firstOrNull { it.id == deleteJobId }
+    if (deleteJob != null) {
+        DeletePendingJobDialog(
+            jobModelName = deleteJob.modelName,
+            onDismiss = { deleteJobId = -1L },
+            onConfirm = {
+                viewModel.deletePendingPrintJob(deleteJob.id)
+                deleteJobId = -1L
             },
         )
     }
@@ -523,7 +659,7 @@ private fun BottomTabButton(
     onClick: () -> Unit,
 ) {
     TextButton(
-        modifier = modifier,
+        modifier = modifier.heightIn(min = 48.dp),
         onClick = onClick,
         shape = RoundedCornerShape(18.dp),
         colors = ButtonDefaults.textButtonColors(
@@ -594,9 +730,12 @@ private fun OverviewPage(
                 onOpenHistory = onOpenHistory,
             )
         }
+        item {
+            OverviewSnapshotSection(state = state)
+        }
         state.activeRoll?.let { activeRoll ->
             item {
-                ActiveRollSection(
+                FocusedActiveRollSection(
                     roll = activeRoll,
                     onConsumeClick = { onConsumeClick(activeRoll.id) },
                     onAdjustClick = { onAdjustClick(activeRoll.id) },
@@ -616,17 +755,21 @@ private fun InventoryPage(
     shelfRolls: List<RollUiModel>,
     shelfExpanded: Boolean,
     allowShelfCollapse: Boolean,
+    archivedExpanded: Boolean,
     modifier: Modifier = Modifier,
     onToggleShelfExpanded: () -> Unit,
+    onToggleArchivedExpanded: () -> Unit,
     onConsumeClick: (Long) -> Unit,
     onAdjustClick: (Long) -> Unit,
     onDeleteClick: (Long) -> Unit,
     onSetActiveClick: (Long) -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
 ) {
     PageColumn(modifier = modifier) {
         state.activeRoll?.let { activeRoll ->
             item {
-                ActiveRollSection(
+                FocusedActiveRollSection(
                     roll = activeRoll,
                     onConsumeClick = { onConsumeClick(activeRoll.id) },
                     onAdjustClick = { onAdjustClick(activeRoll.id) },
@@ -636,7 +779,8 @@ private fun InventoryPage(
         }
         if (state.rolls.isEmpty()) {
             item { EmptyStateCard() }
-        } else if (shelfRolls.isNotEmpty()) {
+        }
+        if (shelfRolls.isNotEmpty()) {
             item {
                 InventoryShelfSection(
                     title = if (state.activeRoll == null) "全部耗材卷" else "其余耗材卷",
@@ -651,9 +795,26 @@ private fun InventoryPage(
                 )
             }
         }
+        if (state.archivedRolls.isNotEmpty()) {
+            item {
+                ArchivedRollsSection(
+                    rolls = state.archivedRolls,
+                    expanded = archivedExpanded,
+                    allowCollapse = state.archivedRolls.size > 1,
+                    onToggleExpanded = onToggleArchivedExpanded,
+                )
+            }
+        }
+        item {
+            DataBackupSection(
+                onExport = onExport,
+                onImport = onImport,
+            )
+        }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SyncPage(
     state: ConsumableUiState,
@@ -663,27 +824,37 @@ private fun SyncPage(
     onDiscoverLan: () -> Unit,
     onScanPairing: (String?) -> Unit,
     onConfirmJob: (Long) -> Unit,
+    onDeleteJob: (Long) -> Unit,
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
 ) {
-    PageColumn(modifier = modifier) {
-        item {
-            SyncStatusSection(
-                syncStatus = state.syncStatus,
-                onSaveEndpoint = onSaveEndpoint,
-                onPullSync = onPullSync,
-                onDiscoverLan = onDiscoverLan,
-                onScanPairing = onScanPairing,
-            )
-        }
-        if (state.pendingPrintJobs.isNotEmpty()) {
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = modifier,
+    ) {
+        PageColumn {
             item {
-                PendingPrintJobsSection(
-                    jobs = state.pendingPrintJobs,
-                    activeRoll = state.activeRoll,
-                    onConfirmJob = onConfirmJob,
+                SyncStatusSection(
+                    syncStatus = state.syncStatus,
+                    onSaveEndpoint = onSaveEndpoint,
+                    onPullSync = onPullSync,
+                    onDiscoverLan = onDiscoverLan,
+                    onScanPairing = onScanPairing,
                 )
             }
-        } else {
-            item { SyncEmptyCard() }
+            if (state.pendingPrintJobs.isNotEmpty()) {
+                item {
+                    PendingPrintJobsSection(
+                        jobs = state.pendingPrintJobs,
+                        activeRoll = state.activeRoll,
+                        onConfirmJob = onConfirmJob,
+                        onDeleteJob = onDeleteJob,
+                    )
+                }
+            } else {
+                item { SyncEmptyCard() }
+            }
         }
     }
 }
@@ -695,11 +866,24 @@ private fun HistoryPage(
 ) {
     PageColumn(modifier = modifier) {
         if (state.recentPrintTasks.isNotEmpty()) {
-            item { PrintTaskHistorySummaryCard(summary = state.printTaskSummary) }
-            item { PrintTaskTimelineSection(tasks = state.recentPrintTasks, expandedInitially = true) }
+            item {
+                PrintTaskHistorySummaryCard(
+                    summary = state.printTaskSummary,
+                    totalTasks = state.recentPrintTasks.size,
+                )
+            }
+                item { RecentPrintTimelineSection(tasks = state.recentPrintTasks) }
+                if (state.printHistory.isNotEmpty()) {
+                    item { ConfirmedPrintDigestSection(history = state.printHistory) }
+                }
         }
         if (state.recentEvents.isNotEmpty()) {
-            item { RecentEventSection(events = state.recentEvents) }
+            item {
+                RecentEventSection(
+                    events = state.recentEvents,
+                    expandedInitially = state.recentPrintTasks.isEmpty(),
+                )
+            }
         } else if (state.recentPrintTasks.isEmpty()) {
             item { HistoryEmptyCard() }
         }
@@ -748,6 +932,53 @@ private fun OverviewNavigatorCard(
                     value = "${state.printHistory.size + state.recentEvents.size} 条",
                     hint = "去记录页查看历史和事件",
                     onClick = onOpenHistory,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverviewSnapshotSection(state: ConsumableUiState) {
+    val lowStockCount = state.rolls.count { it.isLowStock }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("工作面摘要", style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = "首页只保留今天最值得先处理的同步、库存和历史信号。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                HistoryMetricCard(
+                    modifier = Modifier.weight(1f),
+                    label = "待确认",
+                    value = "${state.pendingPrintJobs.size} 条",
+                    accent = ClayOrange,
+                )
+                HistoryMetricCard(
+                    modifier = Modifier.weight(1f),
+                    label = "低余量",
+                    value = "${lowStockCount} 卷",
+                    accent = if (lowStockCount > 0) SignalRed else SuccessMint,
+                )
+                HistoryMetricCard(
+                    modifier = Modifier.weight(1f),
+                    label = "最近同步",
+                    value = state.syncStatus.lastSyncLabel,
+                    accent = MossInk,
                 )
             }
         }
@@ -1217,6 +1448,7 @@ private fun PendingPrintJobsSection(
     jobs: List<PendingPrintJobUiModel>,
     activeRoll: RollUiModel?,
     onConfirmJob: (Long) -> Unit,
+    onDeleteJob: (Long) -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -1243,11 +1475,38 @@ private fun PendingPrintJobsSection(
                 if (index > 0) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 }
-                PendingPrintJobCard(
-                    job = job,
-                    activeRoll = activeRoll,
-                    onConfirm = { onConfirmJob(job.id) },
-                )
+                SwipeToDismissBox(
+                    state = rememberSwipeToDismissBoxState(
+                        confirmValueChange = { value ->
+                            if (value == SwipeToDismissBoxValue.EndToStart) {
+                                onDeleteJob(job.id)
+                                false
+                            } else {
+                                false
+                            }
+                        }
+                    ),
+                    backgroundContent = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(SignalRed.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
+                                .padding(end = 20.dp),
+                            contentAlignment = Alignment.CenterEnd,
+                        ) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "删除", tint = SignalRed)
+                        }
+                    },
+                    enableDismissFromStartToEnd = false,
+                    enableDismissFromEndToStart = true,
+                ) {
+                    PendingPrintJobCard(
+                        job = job,
+                        activeRoll = activeRoll,
+                        onConfirm = { onConfirmJob(job.id) },
+                        onDelete = { onDeleteJob(job.id) },
+                    )
+                }
             }
         }
     }
@@ -1258,6 +1517,7 @@ private fun PendingPrintJobCard(
     job: PendingPrintJobUiModel,
     activeRoll: RollUiModel?,
     onConfirm: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val requiredMaterial = SupportedMaterials.normalize(job.targetMaterial)
     val activeMaterial = SupportedMaterials.normalize(activeRoll?.material)
@@ -1328,7 +1588,59 @@ private fun PendingPrintJobCard(
                 Text("确认并扣减")
             }
         }
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onDelete,
+            enabled = !job.isConfirming,
+            border = BorderStroke(1.dp, SignalRed.copy(alpha = 0.4f)),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = SignalRed.copy(alpha = 0.05f),
+                contentColor = SignalRed,
+            ),
+        ) {
+            Icon(Icons.Outlined.Delete, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("删除此任务")
+        }
     }
+}
+
+@Composable
+private fun DeletePendingJobDialog(
+    jobModelName: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("删除待确认任务", style = MaterialTheme.typography.headlineSmall) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "确认删除「$jobModelName」吗？",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "删除后该打印任务将永久移除，不会扣减任何耗材卷。这个操作不可撤销。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("确认删除", color = Color(0xFFB43A2E))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 @Composable
@@ -1513,7 +1825,7 @@ private fun InventoryShelfSection(
                         if (index > 0) {
                             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         }
-                        RollCard(
+                        InventoryRollCard(
                             roll = roll,
                             cardPadding = 0.dp,
                             onConsumeClick = { onConsumeClick(roll.id) },
@@ -1731,14 +2043,14 @@ private fun StatusPill(
     contentColor: Color,
     icon: @Composable (() -> Unit)? = null,
 ) {
-    Surface(shape = RoundedCornerShape(16.dp), color = containerColor) {
+    Surface(shape = RoundedCornerShape(14.dp), color = containerColor) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             icon?.invoke()
-            Text(text = text, style = MaterialTheme.typography.labelLarge, color = contentColor)
+            Text(text = text, style = MaterialTheme.typography.labelMedium, color = contentColor)
         }
     }
 }
@@ -2053,6 +2365,53 @@ private fun RecentEventSection(events: List<RecentEventUiModel>) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DataBackupSection(
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 18.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("数据备份", style = MaterialTheme.typography.titleLarge)
+            Text(
+                text = "导出当前库存卷（含校准记录）和已确认打印记录为备份文件，也可从备份文件恢复到当前设备。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = onExport,
+                    colors = ButtonDefaults.buttonColors(containerColor = ClayOrange, contentColor = Color.White),
+                ) {
+                    Text("导出数据")
+                }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = onImport,
+                    border = BorderStroke(1.dp, ClayOrange.copy(alpha = 0.45f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ClayOrange),
+                ) {
+                    Text("导入数据")
                 }
             }
         }

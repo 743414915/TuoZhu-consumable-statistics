@@ -53,6 +53,7 @@ data class RollUiModel(
     val progress: Float,
     val isLowStock: Boolean,
     val isActive: Boolean,
+    val isArchived: Boolean,
     val notes: String,
     val calibrationLabel: String,
 )
@@ -138,6 +139,7 @@ data class PrintTaskHistorySummaryUiModel(
 
 data class ConsumableUiState(
     val rolls: List<RollUiModel> = emptyList(),
+    val archivedRolls: List<RollUiModel> = emptyList(),
     val activeRoll: RollUiModel? = null,
     val recentEvents: List<RecentEventUiModel> = emptyList(),
     val syncStatus: SyncStatusUiModel = SyncStatusUiModel(),
@@ -153,10 +155,16 @@ class ConsumableViewModel(
     private val syncSettingsStore: SyncSettingsStore,
     private val lanEndpointDiscovery: DesktopLanEndpointDiscovery = DesktopLanEndpointDiscovery(),
 ) : ViewModel() {
+    data class ImportPreview(val rollCount: Int, val printJobCount: Int)
+
     private val messageState = MutableStateFlow<String?>(null)
     private val confirmingJobIdsState = MutableStateFlow<Set<Long>>(emptySet())
     private val isDiscoveringLanState = MutableStateFlow(false)
     private val isPullingState = MutableStateFlow(false)
+    private val isRefreshingState = MutableStateFlow(false)
+    private val exportJsonState = MutableStateFlow<String?>(null)
+    private val importPreviewState = MutableStateFlow<ImportPreview?>(null)
+    private var pendingImportJson: String? = null
     private val pullSyncMutex = Mutex()
     private val rollsFlow = repository.observeRolls().stateIn(
         scope = viewModelScope,
@@ -248,11 +256,12 @@ class ConsumableViewModel(
                 estimatedRemainingGrams = repository.calculateRemaining(roll),
             )
         }
-        val visibleRollItems = snapshots
-            .filterNot { it.roll.isArchivedRoll() }
-            .map(::toRollUiModel)
+        val allRollItems = snapshots.map(::toRollUiModel)
+        val visibleRollItems = allRollItems.filterNot { it.isArchived }
+        val archivedRollItems = allRollItems.filter { it.isArchived }
         ConsumableUiState(
             rolls = visibleRollItems,
+            archivedRolls = archivedRollItems,
             activeRoll = visibleRollItems.firstOrNull { it.isActive },
             recentEvents = mapRecentEvents(data.rolls, data.recentEvents)
                 .filterNot { it.type == "PRINT_USAGE" }
@@ -344,8 +353,13 @@ class ConsumableViewModel(
 
     fun pullSync() {
         viewModelScope.launch {
-            val result = performPullSync() ?: return@launch
-            messageState.value = result.message
+            isRefreshingState.value = true
+            try {
+                val result = performPullSync() ?: return@launch
+                messageState.value = result.message
+            } finally {
+                isRefreshingState.value = false
+            }
         }
     }
 
@@ -412,9 +426,69 @@ class ConsumableViewModel(
         }
     }
 
+    fun deletePendingPrintJob(jobId: Long) {
+        viewModelScope.launch {
+            val deleted = repository.deletePrintJob(jobId)
+            messageState.value = if (deleted) "已删除待确认打印任务" else "该任务不存在或已被处理"
+        }
+    }
+
     fun consumeMessage() {
         messageState.value = null
     }
+
+    fun prepareExport() {
+        viewModelScope.launch {
+            val json = repository.buildExportJson()
+            exportJsonState.value = json
+        }
+    }
+
+    fun clearExportData() {
+        exportJsonState.value = null
+    }
+
+    fun prepareImport(json: String) {
+        try {
+            val data = com.tuozhu.consumablestatistics.data.DataExportImport.parseImportJson(json)
+            if (data == null) {
+                messageState.value = "无法识别导入文件，请确认选择了正确的备份文件"
+                return
+            }
+            pendingImportJson = json
+            importPreviewState.value = ImportPreview(
+                rollCount = data.rolls.size,
+                printJobCount = data.printJobs.size,
+            )
+        } catch (e: Exception) {
+            messageState.value = "无法解析导入文件：${e.message ?: "格式错误"}"
+        }
+    }
+
+    fun confirmImport() {
+        val json = pendingImportJson ?: return
+        pendingImportJson = null
+        importPreviewState.value = null
+        viewModelScope.launch {
+            try {
+                val result = repository.importFromJson(json)
+                messageState.value = "已导入 ${result.rollCount} 卷耗材、${result.printJobCount} 条打印记录"
+            } catch (e: Exception) {
+                messageState.value = "导入失败：${e.message ?: "未知错误"}"
+            }
+        }
+    }
+
+    fun cancelImport() {
+        pendingImportJson = null
+        importPreviewState.value = null
+    }
+
+    fun observeExportJson() = exportJsonState
+
+    fun observeImportPreview() = importPreviewState
+
+    fun observeIsRefreshing() = isRefreshingState
 
     private fun toRollUiModel(snapshot: RollSnapshot): RollUiModel {
         val roll = snapshot.roll
@@ -429,6 +503,7 @@ class ConsumableViewModel(
             progress = WeightMath.progress(snapshot.estimatedRemainingGrams, roll.initialWeightGrams),
             isLowStock = WeightMath.isLowStock(snapshot.estimatedRemainingGrams, roll.lowStockThresholdGrams),
             isActive = roll.isActive,
+            isArchived = roll.isArchivedRoll(),
             notes = roll.visibleNotes(),
             calibrationLabel = "上次校准 ${formatTimestamp(roll.lastCalibrationAt)}",
         )

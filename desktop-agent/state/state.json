@@ -1,8 +1,8 @@
 ﻿{
-    "updatedAt":  1776414785886,
-    "inputMode":  "sample-json",
+    "updatedAt":  1777348959831,
+    "inputMode":  "bambu-gcode",
     "warnings":  [
-
+                     "材料识别存在冲突，已按 filament_settings_id 采用 \u0027PETG Basic\u0027。"
                  ],
     "jobs":  [
                  {
@@ -44,6 +44,20 @@
                      "signature":  "机械风格-皮卡丘V2|43|PETG Basic|From Bambu Studio gcode .23028.0.gcode|1776047252596",
                      "status":  "DRAFT",
                      "lastSeenAt":  1776070546047,
+                     "confirmedAt":  null,
+                     "targetRollId":  null
+                 },
+                 {
+                     "externalJobId":  "bambu-gcode-1692-1",
+                     "source":  "DESKTOP_AGENT",
+                     "modelName":  "浅浅丘（歪头）MW",
+                     "estimatedUsageGrams":  147,
+                     "targetMaterial":  "PETG Basic",
+                     "note":  "来自 Bambu Studio 切片文件 .1692.1.gcode",
+                     "createdAt":  1777348390985,
+                     "signature":  "浅浅丘（歪头）MW|147|PETG Basic|来自 Bambu Studio 切片文件 .1692.1.gcode|1777348390985",
+                     "status":  "DRAFT",
+                     "lastSeenAt":  1777348959831,
                      "confirmedAt":  null,
                      "targetRollId":  null
                  }
