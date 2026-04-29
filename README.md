@@ -1,78 +1,104 @@
 # 拓竹耗材管家
 
-面向 `Bambu Lab A1 mini + 无 AMS` 场景的耗材管理项目。当前交付由两部分组成：
+面向 **Bambu Lab A1 mini（无 AMS）** 的耗材管理工具，由 Android 手机端 + Windows 桌面端两部分协同工作。
 
-- `app/`：Android 手机端，用于管理耗材卷、确认打印任务、查看历史记录。
-- `desktop-app/`：Windows 桌面端 GUI，用于监听 Bambu Studio 切片缓存、解析 `.gcode`、向手机端提供内置同步服务。
+## 系统要求
 
-桌面端当前主方案是：
+| 组件 | 运行环境 |
+|---|---|
+| **桌面端** (`output/desktop/`) | Windows 10/11 x64 |
+| **Android 端** (`output/android/`) | Android 8.0+，需摄像头（扫码配对用） |
+| **网络** | 手机和电脑需在同一局域网，或通过 Tailscale 组网 |
 
-1. `desktop-app` 启动桌面 GUI。
-2. GUI 内置 HTTP 服务，提供 `/health`、`/api/sync/pull`、`/api/sync/confirm`。
-3. GUI 调用 `desktop-agent/run-sync-agent.ps1` 解析最近切片的 `.gcode`。
-4. 解析结果写入 `desktop-agent/outbox` 和 `desktop-agent/state`。
-5. Android 端拉取草稿任务，用户确认后再扣减当前耗材卷。
+## 快速开始
 
-旧的“单独启动 PowerShell HTTP 服务”方案已归档：
+### 1. 启动桌面端
 
-- `docs/archive/`
-- `desktop-agent/legacy/`
+将 `output/desktop/` 整个目录复制到 Windows 电脑上（**不要只复制 .exe**），双击 `TuoZhuDesktopSync.exe`：
 
-## 当前能力
+1. 点击 **启动服务** — 桌面端开始监听 Bambu Studio 切片输出
+2. 在"推荐地址"卡片中查看本机地址
+3. 手机扫描二维码完成配对
 
-- 耗材卷管理：新增、编辑、切换活动卷、归档已用完卷。
-- 材料范围：`PLA Basic`、`PETG Basic`、`PLA Silk`。
-- Android 端支持手动同步、扫码配对、待确认打印任务、打印历史记录。
-- 桌面端支持实时监听 Bambu Studio 缓存目录，检测最近切片并自动生成同步草稿。
-- 桌面端推荐地址优先展示 Tailscale，其次展示局域网地址。
+### 2. 安装 Android 端
 
-## 代码入口
+将 `output/android/app-debug.apk` 传输到 Android 手机并安装：
 
-- Android 应用入口：`app/src/main/java/com/tuozhu/consumablestatistics/MainActivity.kt`
-- Android 同步实现：`app/src/main/java/com/tuozhu/consumablestatistics/sync/`
-- 桌面 GUI 入口：`desktop-app/src/main/java/com/tuozhu/desktop/DesktopSyncApp.java`
-- 桌面内置服务：`desktop-app/src/main/java/com/tuozhu/desktop/EmbeddedSyncService.java`
-- G-code 监听：`desktop-app/src/main/java/com/tuozhu/desktop/GcodeWatchService.java`
-- G-code 解析引擎：`desktop-agent/run-sync-agent.ps1`
+1. 打开应用 → 切换到**同步**页
+2. 点击 **扫码配对**，扫描桌面端的二维码
+3. 点击 **立即拉取** 获取桌面端的打印草稿
+4. 在卷库中管理耗材卷，确认打印任务后自动扣减
 
-## 仓库结构
+### 3. 切片自动同步
 
-```text
-app/                 Android 客户端
-desktop-app/         Windows 桌面 GUI 与内置 HTTP 服务
-desktop-agent/       G-code 解析、状态文件、同步草稿引擎
-docs/                当前方案文档
-docs/archive/        已归档的旧方案文档
-scripts/             使用项目内 .tools 的构建脚本
+在 Bambu Studio 中切片后，gcode 文件输出到以下目录即可被桌面端自动检测：
+
+- `桌面`（默认）
+- `%LOCALAPPDATA%\Temp\bamboo_model`（Bambu Studio 缓存目录）
+
+如需添加其他目录，在桌面端点击左下角 **设置** → "G-code 监听目录"。
+
+---
+
+## output/ 目录说明
+
+```
+output/
+├── android/
+│   └── app-debug.apk              Android 应用安装包
+└── desktop/
+    ├── TuoZhuDesktopSync.exe      桌面端主程序
+    ├── resources/
+    │   ├── app.asar               Vue 前端
+    │   └── desktop-agent/         G-code 解析引擎
+    └── ...                         Electron 运行库
 ```
 
-## 构建方式
+换电脑时复制整个 `output/` 目录即可，无需安装任何依赖。
 
-本仓库优先使用项目内的 `.tools`，避免修改电脑系统环境。
+---
 
-- Android 调试构建：`powershell -ExecutionPolicy Bypass -File .\scripts\build-debug.ps1`
-- 桌面端打包：`powershell -ExecutionPolicy Bypass -File .\scripts\build-desktop-app.ps1`
+## 源码结构
 
-注意：
+```
+├── app/                            Android 客户端（Kotlin + Jetpack Compose + Room）
+│   └── src/main/java/.../ui/
+│       ├── screen/                 4 个页面：Overview / Inventory / Sync / History
+│       ├── ConsumableViewModel.kt  全局状态管理
+│       └── theme/                  配色与字体
+├── desktop-vue/                    Windows 桌面端（Electron + Vue 3 + TypeScript）
+│   ├── electron/main.ts           主进程（HTTP 服务、G-code 监听、同步调度）
+│   ├── src/                       渲染进程（Vue 组件）
+│   └── src/components/            UI 组件
+├── desktop-agent/                  PowerShell G-code 解析引擎
+│   ├── run-sync-agent.ps1          主脚本（解析 .gcode → 生成草稿）
+│   ├── outbox/                     桌面端输出（草稿 + 确认回执）
+│   └── state/                      运行状态文件
+├── scripts/                        构建脚本
+└── docs/                           架构与协议文档
+```
 
-- `gradle/wrapper/` 当前只有 `gradle-wrapper.properties`，缺少 `gradle-wrapper.jar`。
-- 因此默认不要依赖 `gradlew`，优先使用 `scripts/` 下脚本。
+---
 
-## 运行桌面端
+## 从源码构建
 
-桌面打包输出目录：
+详见 `CLAUDE.md`，摘要：
 
-- `dist/desktop/TuoZhuDesktopSync/`
+**Android**：
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-debug.ps1
+```
+APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`
 
-直接运行：
+**桌面端**：
+```bash
+cd desktop-vue
+npm install
+npm run electron:build
+```
+成品输出到 `dist-electron/win-unpacked/`
 
-- `dist/desktop/TuoZhuDesktopSync/TuoZhuDesktopSync.exe`
+### 构建依赖
 
-如果换一台 Windows 电脑运行，复制整个 `TuoZhuDesktopSync` 目录即可，不要只复制 `.exe`。目录内的 `runtime/`、`app/`、`desktop-agent/` 都是必需的。
-
-## 推荐文档
-
-- `docs/DESKTOP_GUI_USAGE.md`：桌面端日常使用
-- `docs/ARCHITECTURE.md`：当前架构与代码职责
-- `docs/DESKTOP_SYNC_PROTOCOL.md`：桌面和 Android 的同步协议
-- `desktop-agent/README.md`：同步引擎目录说明
+- **Android**：JDK 17、Android SDK（项目内 `.tools/` 已包含）
+- **桌面端**：Node.js 18+、npm（需自行安装）

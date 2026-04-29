@@ -16,3 +16,4 @@ desktop-vue/node_modules/
 desktop-vue/dist/
 desktop-vue/dist-electron/
 dist-electron/
+output/

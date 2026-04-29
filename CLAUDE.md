@@ -32,6 +32,19 @@ npm run electron:dev            # dev with hot-reload
 npm run electron:build          # production build + package via electron-builder
 ```
 
+**After every build, copy the outputs to `output/`:**
+
+```powershell
+# Copy Android APK
+cp app/build/outputs/apk/debug/app-debug.apk output/android/
+
+# Copy desktop app (entire win-unpacked folder)
+rm -r -force output/desktop/*
+cp -r dist-electron/win-unpacked/* output/desktop/
+```
+
+The `output/` directory is the single distribution point — it contains the latest APK and portable EXE ready to copy to another machine (see `README.md`). Always refresh these after a successful build.
+
 To run a single Android unit test class or method:
 
 ```powershell
