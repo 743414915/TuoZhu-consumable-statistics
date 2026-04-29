@@ -1,16 +1,18 @@
 package com.tuozhu.consumablestatistics.ui.screen
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,7 +37,9 @@ import com.tuozhu.consumablestatistics.ui.ConsumableUiState
 import com.tuozhu.consumablestatistics.ui.FocusedActiveRollSection
 import com.tuozhu.consumablestatistics.ui.InventoryRollCard
 import com.tuozhu.consumablestatistics.ui.RollUiModel
-import com.tuozhu.consumablestatistics.ui.theme.ClayOrange
+import com.tuozhu.consumablestatistics.ui.theme.BorderLight
+import com.tuozhu.consumablestatistics.ui.theme.SlateBlue
+import com.tuozhu.consumablestatistics.ui.theme.TextSecondary
 
 @Composable
 fun InventoryPage(
@@ -56,8 +60,8 @@ fun InventoryPage(
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = WindowInsets.navigationBars.asPaddingValues(),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         state.activeRoll?.let { roll ->
             item {
@@ -73,50 +77,73 @@ fun InventoryPage(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, BorderLight),
                 ) {
-                    Column(
-                        modifier = Modifier.padding(28.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text("还没有耗材卷", style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            "点击右下角 + 添加第一卷耗材，开始管理库存。",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Column(Modifier.padding(32.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("还没有耗材卷", style = MaterialTheme.typography.titleMedium)
+                        Text("点击右下角 + 添加第一卷耗材。", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                     }
                 }
             }
         }
         if (shelfRolls.isNotEmpty()) {
-            item {
-                ShelfCard(
-                    title = if (state.activeRoll == null) "全部耗材卷" else "其余耗材卷",
-                    rolls = shelfRolls,
-                    expanded = shelfExpanded,
-                    allowCollapse = allowShelfCollapse,
-                    onToggleExpanded = onToggleShelfExpanded,
-                    onConsumeClick = onConsumeClick,
-                    onAdjustClick = onAdjustClick,
-                    onDeleteClick = onDeleteClick,
-                    onSetActiveClick = onSetActiveClick,
-                )
-            }
+            item { ShelfCard(shelfRolls, if (state.activeRoll == null) "全部耗材卷" else "其余耗材卷", shelfExpanded, allowShelfCollapse, onToggleShelfExpanded, onConsumeClick, onAdjustClick, onDeleteClick, onSetActiveClick) }
         }
         if (state.archivedRolls.isNotEmpty()) {
-            item {
-                ArchivedRollsSection(
-                    rolls = state.archivedRolls,
-                    expanded = archivedExpanded,
-                    allowCollapse = state.archivedRolls.size > 1,
-                    onToggleExpanded = onToggleArchivedExpanded,
-                )
-            }
+            item { ArchivedRollsSection(rolls = state.archivedRolls, expanded = archivedExpanded, allowCollapse = state.archivedRolls.size > 1, onToggleExpanded = onToggleArchivedExpanded) }
         }
         item { BackupCard(onExport, onImport) }
+    }
+}
+
+@Composable
+private fun ShelfCard(
+    rolls: List<RollUiModel>,
+    title: String,
+    expanded: Boolean,
+    allowCollapse: Boolean,
+    onToggle: () -> Unit,
+    onConsume: (Long) -> Unit,
+    onAdjust: (Long) -> Unit,
+    onDelete: (Long) -> Unit,
+    onSetActive: (Long) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, BorderLight),
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Text("共 ${rolls.size} 卷", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                }
+                if (allowCollapse) {
+                    TextButton(onClick = onToggle) {
+                        Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null)
+                        Text(if (expanded) "收起" else "展开")
+                    }
+                }
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    rolls.forEachIndexed { i, roll ->
+                        if (i > 0) HorizontalDivider(color = BorderLight)
+                        InventoryRollCard(
+                            roll = roll, cardPadding = 0.dp,
+                            onConsumeClick = { onConsume(roll.id) },
+                            onAdjustClick = { onAdjust(roll.id) },
+                            onDeleteClick = { onDelete(roll.id) },
+                            onSetActiveClick = { onSetActive(roll.id) },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -124,83 +151,20 @@ fun InventoryPage(
 private fun BackupCard(onExport: () -> Unit, onImport: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, BorderLight),
     ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text("数据备份", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "导出完整备份（含事件与打印记录）或从其他设备导入。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                TextButton(
-                    onClick = onExport,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Outlined.Upload, null, tint = ClayOrange)
-                    Text(" 导出", color = ClayOrange)
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("数据备份", style = MaterialTheme.typography.titleMedium)
+            Text("导出完整备份（含事件与打印记录）或从其他设备导入。", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            HorizontalDivider(color = BorderLight)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextButton(onClick = onExport, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Outlined.Upload, null, tint = SlateBlue); Spacer(Modifier.width(4.dp)); Text("导出", color = SlateBlue)
                 }
-                TextButton(
-                    onClick = onImport,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Outlined.Download, null, tint = ClayOrange)
-                    Text(" 导入", color = ClayOrange)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ShelfCard(
-    title: String,
-    rolls: List<RollUiModel>,
-    expanded: Boolean,
-    allowCollapse: Boolean,
-    onToggleExpanded: () -> Unit,
-    onConsumeClick: (Long) -> Unit,
-    onAdjustClick: (Long) -> Unit,
-    onDeleteClick: (Long) -> Unit,
-    onSetActiveClick: (Long) -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(title, style = MaterialTheme.typography.titleLarge)
-                    Text("共 ${rolls.size} 卷", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (allowCollapse) {
-                    TextButton(onClick = onToggleExpanded) {
-                        Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null)
-                        Text(if (expanded) "收起" else "展开")
-                    }
-                }
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    rolls.forEachIndexed { i, roll ->
-                        if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                        InventoryRollCard(
-                            roll = roll,
-                            cardPadding = 0.dp,
-                            onConsumeClick = { onConsumeClick(roll.id) },
-                            onAdjustClick = { onAdjustClick(roll.id) },
-                            onDeleteClick = { onDeleteClick(roll.id) },
-                            onSetActiveClick = { onSetActiveClick(roll.id) },
-                        )
-                    }
+                TextButton(onClick = onImport, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Outlined.Download, null, tint = SlateBlue); Spacer(Modifier.width(4.dp)); Text("导入", color = SlateBlue)
                 }
             }
         }

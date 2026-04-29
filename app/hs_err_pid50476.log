@@ -1,0 +1,221 @@
+#
+# There is insufficient memory for the Java Runtime Environment to continue.
+# Native memory allocation (mmap) failed to map 534773760 bytes for G1 virtual space
+# Possible reasons:
+#   The system is out of physical RAM or swap space
+#   The process is running with CompressedOops enabled, and the Java Heap may be blocking the growth of the native heap
+# Possible solutions:
+#   Reduce memory load on the system
+#   Increase physical memory or swap space
+#   Check if swap backing store is full
+#   Decrease Java heap size (-Xmx/-Xms)
+#   Decrease number of Java threads
+#   Decrease Java thread stack sizes (-Xss)
+#   Set larger code cache with -XX:ReservedCodeCacheSize=
+#   JVM is running with Unscaled Compressed Oops mode in which the Java heap is
+#     placed in the first 4GB address space. The Java Heap base address is the
+#     maximum limit for the native heap growth. Please use -XX:HeapBaseMinAddress
+#     to set the Java Heap base and to place the Java Heap above 4GB virtual address.
+# This output file may be truncated or incomplete.
+#
+#  Out of Memory Error (os_windows.cpp:3532), pid=50476, tid=16368
+#
+# JRE version:  (17.0.2+8) (build )
+# Java VM: OpenJDK 64-Bit Server VM (17.0.2+8-86, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, windows-amd64)
+# No core dump will be written. Minidumps are not enabled by default on client versions of Windows
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Djava.awt.headless=true -Djava.library.path=E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin;C:\WINDOWS\Sun\Java\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\Users\Administrator\bin;D:\Git\mingw64\bin;D:\Git\usr\local\bin;D:\Git\usr\bin;D:\Git\usr\bin;D:\Git\mingw64\bin;D:\Git\usr\bin;C:\Users\Administrator\bin;E:\Python313\Scripts;E:\Python313;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0;C:\WINDOWS\System32\OpenSSH;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\dotnet;D:\nvm;D:\nodejs;D:\Go\bin;D:\Git\cmd;D:\Go\bin\bin;D:\Program Files\Tailscale;C:\Users\Administrator\AppData\Local\Microsoft\WindowsApps;D:\nvm;D:\nodejs;D:\Go\bin\go1.20.8\bin;D:\Microsoft VS Code\bin;D:\GoLand 2023.2.3\bin;D:\WebStorm 2024.3.4\bin;D:\JetBrains\PyCharm 2024.3.4\bin;D:\JetBrains\GoLand 2025.1\bin;D:\JetBrains\WebStorm 2025.1\bin;C:\Users\Administrator\AppData\Local\Programs\Ollama;D:\Microsoft VS Code Insiders\bin;D:\Git\usr\bin\vendor_perl;D:\Git\usr\bin\core_perl;C:\Users\Administrator\.claude\plugins\cache\claude-plugins-official\frontend-design\c5837a2c23b6\bin;.;E:\work\TuoZhu-consumable-statistics\app\src\testDebug\jniLibs;E:\work\TuoZhu-consumable-statistics\app\src\test\jniLibs -Dorg.gradle.internal.worker.tmpdir=E:\work\TuoZhu-consumable-statistics\app\build\tmp\testDebugUnitTest\work --add-opens=java.base/java.io=ALL-UNNAMED -Xmx512m -Dfile.encoding=UTF-8 -Duser.country=CN -Duser.language=zh -Duser.variant -ea worker.org.gradle.process.internal.worker.GradleWorkerMain 'Gradle Test Executor 4'
+
+Host: Intel(R) Core(TM) i7-14700F, 28 cores, 31G,  Windows 11 , 64 bit Build 22621 (10.0.22621.3672)
+Time: Wed Apr 29 15:00:24 2026  Windows 11 , 64 bit Build 22621 (10.0.22621.3672) elapsed time: 0.005300 seconds (0d 0h 0m 0s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x000001dfac4cd190):  JavaThread "Unknown thread" [_thread_in_vm, id=16368, stack(0x000000151fa00000,0x000000151fb00000)]
+
+Stack: [0x000000151fa00000,0x000000151fb00000]
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+V  [jvm.dll+0x670baa]
+V  [jvm.dll+0x7cfcb4]
+V  [jvm.dll+0x7d145e]
+V  [jvm.dll+0x7d1ac3]
+V  [jvm.dll+0x242bc5]
+V  [jvm.dll+0x66dac9]
+V  [jvm.dll+0x662412]
+V  [jvm.dll+0x300c0b]
+V  [jvm.dll+0x3081a6]
+V  [jvm.dll+0x357d0e]
+V  [jvm.dll+0x357f3f]
+V  [jvm.dll+0x2d7ec8]
+V  [jvm.dll+0x2d8e34]
+V  [jvm.dll+0x7a18c1]
+V  [jvm.dll+0x365a91]
+V  [jvm.dll+0x780d2c]
+V  [jvm.dll+0x3e845f]
+V  [jvm.dll+0x3e9f01]
+C  [jli.dll+0x527b]
+C  [ucrtbase.dll+0x29333]
+C  [KERNEL32.DLL+0x1257d]
+C  [ntdll.dll+0x5af28]
+
+
+---------------  P R O C E S S  ---------------
+
+Threads class SMR info:
+_java_thread_list=0x00007ffff2f29858, length=0, elements={
+}
+
+Java Threads: ( => current thread )
+
+Other Threads:
+  0x000001dfac4f67b0 GCTaskThread "GC Thread#0" [stack: 0x000000151fb00000,0x000000151fc00000] [id=50604]
+  0x000001dfac4eb170 ConcurrentGCThread "G1 Main Marker" [stack: 0x000000151fc00000,0x000000151fd00000] [id=49968]
+  0x000001dfac4fcd10 ConcurrentGCThread "G1 Conc#0" [stack: 0x000000151fd00000,0x000000151fe00000] [id=49728]
+
+[error occurred during error reporting (printing all threads), id 0xc0000005, EXCEPTION_ACCESS_VIOLATION (0xc0000005) at pc=0x00007ffff27788a7]
+
+VM state: not at safepoint (not fully initialized)
+
+VM Mutex/Monitor currently owned by a thread:  ([mutex/lock_event])
+[0x000001dfac4c72c0] Heap_lock - owner thread: 0x000001dfac4cd190
+
+Heap address: 0x00000000e0000000, size: 512 MB, Compressed Oops mode: 32-bit
+
+CDS archive(s) mapped at: [0x0000000000000000-0x0000000000000000-0x0000000000000000), size 0, SharedBaseAddress: 0x0000000800000000, ArchiveRelocationMode: 0.
+Narrow klass base: 0x0000000000000000, Narrow klass shift: 0, Narrow klass range: 0x0
+
+GC Precious Log:
+<Empty>
+
+Heap:
+ garbage-first heap   total 0K, used 0K [0x00000000e0000000, 0x0000000100000000)
+  region size 1024K, 0 young (0K), 0 survivors (0K)
+
+[error occurred during error reporting (printing heap information), id 0xc0000005, EXCEPTION_ACCESS_VIOLATION (0xc0000005) at pc=0x00007ffff2b59f19]
+
+GC Heap History (0 events):
+No events
+
+Deoptimization events (0 events):
+No events
+
+Classes unloaded (0 events):
+No events
+
+Classes redefined (0 events):
+No events
+
+Internal exceptions (0 events):
+No events
+
+VM Operations (0 events):
+No events
+
+Events (1 events):
+Event: 0.003 Loaded shared library E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\java.dll
+
+
+Dynamic libraries:
+0x00007ff62c4e0000 - 0x00007ff62c4ee000 	E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\java.exe
+0x00007ff8b76d0000 - 0x00007ff8b78e7000 	C:\WINDOWS\SYSTEM32\ntdll.dll
+0x00007ff8b5d10000 - 0x00007ff8b5dd4000 	C:\WINDOWS\System32\KERNEL32.DLL
+0x00007ff8b4a00000 - 0x00007ff8b4dad000 	C:\WINDOWS\System32\KERNELBASE.dll
+0x00007ff8b52f0000 - 0x00007ff8b5401000 	C:\WINDOWS\System32\ucrtbase.dll
+0x00007ff8a1f50000 - 0x00007ff8a1f68000 	E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\jli.dll
+0x00007ff893980000 - 0x00007ff89399a000 	E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\VCRUNTIME140.dll
+0x00007ff8b5b60000 - 0x00007ff8b5d0e000 	C:\WINDOWS\System32\USER32.dll
+0x00007ff89fce0000 - 0x00007ff89ff73000 	C:\WINDOWS\WinSxS\amd64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.22621.3672_none_2713b9d173822955\COMCTL32.dll
+0x00007ff8b4db0000 - 0x00007ff8b4dd6000 	C:\WINDOWS\System32\win32u.dll
+0x00007ff8b5410000 - 0x00007ff8b54b7000 	C:\WINDOWS\System32\msvcrt.dll
+0x00007ff8b7140000 - 0x00007ff8b7169000 	C:\WINDOWS\System32\GDI32.dll
+0x00007ff8b50c0000 - 0x00007ff8b51d9000 	C:\WINDOWS\System32\gdi32full.dll
+0x00007ff8b51e0000 - 0x00007ff8b527a000 	C:\WINDOWS\System32\msvcp_win.dll
+0x00007ff8b55e0000 - 0x00007ff8b5611000 	C:\WINDOWS\System32\IMM32.DLL
+0x00007ff8afb80000 - 0x00007ff8afb8c000 	E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\vcruntime140_1.dll
+0x00007ff80ba10000 - 0x00007ff80ba9d000 	E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\msvcp140.dll
+0x00007ffff2490000 - 0x00007ffff3051000 	E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\server\jvm.dll
+0x00007ff8b7190000 - 0x00007ff8b7242000 	C:\WINDOWS\System32\ADVAPI32.dll
+0x00007ff8b75e0000 - 0x00007ff8b7689000 	C:\WINDOWS\System32\sechost.dll
+0x00007ff8b5090000 - 0x00007ff8b50b8000 	C:\WINDOWS\System32\bcrypt.dll
+0x00007ff8b5820000 - 0x00007ff8b5934000 	C:\WINDOWS\System32\RPCRT4.dll
+0x00007ff8b6e40000 - 0x00007ff8b6e48000 	C:\WINDOWS\System32\PSAPI.DLL
+0x00007ff89ae30000 - 0x00007ff89ae39000 	C:\WINDOWS\SYSTEM32\WSOCK32.dll
+0x00007ff8ad9f0000 - 0x00007ff8ad9fa000 	C:\WINDOWS\SYSTEM32\VERSION.dll
+0x00007ff8a9ce0000 - 0x00007ff8a9d14000 	C:\WINDOWS\SYSTEM32\WINMM.dll
+0x00007ff8b6640000 - 0x00007ff8b66b1000 	C:\WINDOWS\System32\WS2_32.dll
+0x00007ff8b3ae0000 - 0x00007ff8b3af8000 	C:\WINDOWS\SYSTEM32\kernel.appcore.dll
+0x00007ff893ae0000 - 0x00007ff893aea000 	E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\jimage.dll
+0x00007ff8b2330000 - 0x00007ff8b2562000 	C:\WINDOWS\SYSTEM32\DBGHELP.DLL
+0x00007ff8b7250000 - 0x00007ff8b75d8000 	C:\WINDOWS\System32\combase.dll
+0x00007ff8b6d00000 - 0x00007ff8b6dd7000 	C:\WINDOWS\System32\OLEAUT32.dll
+0x00007ff8a4320000 - 0x00007ff8a4352000 	C:\WINDOWS\SYSTEM32\dbgcore.DLL
+0x00007ff8b4ea0000 - 0x00007ff8b4f1b000 	C:\WINDOWS\System32\bcryptPrimitives.dll
+0x00007ff893940000 - 0x00007ff893965000 	E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\java.dll
+
+dbghelp: loaded successfully - version: 4.0.5 - missing functions: none
+symbol engine: initialized successfully - sym options: 0x614 - pdb path: .;E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin;C:\WINDOWS\SYSTEM32;C:\WINDOWS\WinSxS\amd64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.22621.3672_none_2713b9d173822955;E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin\server
+
+VM Arguments:
+jvm_args: -Djava.awt.headless=true -Djava.library.path=E:\work\TuoZhu-consumable-statistics\.tools\jdk\jdk-17\bin;C:\WINDOWS\Sun\Java\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\Users\Administrator\bin;D:\Git\mingw64\bin;D:\Git\usr\local\bin;D:\Git\usr\bin;D:\Git\usr\bin;D:\Git\mingw64\bin;D:\Git\usr\bin;C:\Users\Administrator\bin;E:\Python313\Scripts;E:\Python313;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0;C:\WINDOWS\System32\OpenSSH;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\dotnet;D:\nvm;D:\nodejs;D:\Go\bin;D:\Git\cmd;D:\Go\bin\bin;D:\Program Files\Tailscale;C:\Users\Administrator\AppData\Local\Microsoft\WindowsApps;D:\nvm;D:\nodejs;D:\Go\bin\go1.20.8\bin;D:\Microsoft VS Code\bin;D:\GoLand 2023.2.3\bin;D:\WebStorm 2024.3.4\bin;D:\JetBrains\PyCharm 2024.3.4\bin;D:\JetBrains\GoLand 2025.1\bin;D:\JetBrains\WebStorm 2025.1\bin;C:\Users\Administrator\AppData\Local\Programs\Ollama;D:\Microsoft VS Code Insiders\bin;D:\Git\usr\bin\vendor_perl;D:\Git\usr\bin\core_perl;C:\Users\Administrator\.claude\plugins\cache\claude-plugins-official\frontend-design\c5837a2c23b6\bin;.;E:\work\TuoZhu-consumable-statistics\app\src\testDebug\jniLibs;E:\work\TuoZhu-consumable-statistics\app\src\test\jniLibs -Dorg.gradle.internal.worker.tmpdir=E:\work\TuoZhu-consumable-statistics\app\build\tmp\testDebugUnitTest\work --add-opens=java.base/java.io=ALL-UNNAMED -Xmx512m -Dfile.encoding=UTF-8 -Duser.country=CN -Duser.language=zh -Duser.variant -ea 
+java_command: worker.org.gradle.process.internal.worker.GradleWorkerMain 'Gradle Test Executor 4'
+java_class_path (initial): E:\\work\\TuoZhu-consumable-statistics\\.tools\\gradle-user-home\\caches\\8.10.2\\workerMain\\gradle-worker.jar;E:\\work\\TuoZhu-consumable-statistics\\app\\build\\tmp\\kotlin-classes\\debugUnitTest;E:\\work\\TuoZhu-consumable-statistics\\app\\build\\intermediates\\java_res\\debugUnitTest\\processDebugUnitTestJavaRes\\out;E:\\work\\TuoZhu-consumable-statistics\\app\\build\\intermediates\\runtime_app_classes_jar\\debug\\bundleDebugClassesToRuntimeJar\\classes.jar;E:\\work\\TuoZhu-consumable-statistics\\.tools\\gradle-user-home\\caches\\modules-2\\files-2.1\\junit\\junit\\4.13.2\\8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12\\junit-4.13.2.jar;E:\\work\\TuoZhu-consumable-statistics\\.tools\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.jetbrains.kotlinx\\kotlinx-coroutines-test-jvm\\1.9.0\\7227c0691a604e2b32f525b628014dda862d0eed\\kotlinx-coroutines-test-jvm-1.9.0.jar;E:\\work\\TuoZhu-consumable-statistics\\.tools\\gradle-user-home\\caches\\modules-2\\files-2.1\\androidx.room\\room-common\\2.6.1\\ff1b9580850a9b7eef56554e356628d225785265\\room-common-2.6.1.jar;E:\\work\\TuoZhu-consumable-statistics\\.tools\\gradle-user-home\\caches\\8.10.2\\transforms\\cf521ddce7a0f7fc2daa5d81cc30bf95\\transformed\\room-runtime-2.6.1-runtime.jar;E:\\work\\TuoZhu-consumable-statistics\\.tools\\gradle-user-home\\caches\\8.10.2\\transforms\\2040f36e2e00558f6b2ab9497952fc3d\\transformed\\room-ktx-2.6.1-runtime.jar;E:\\work\\TuoZhu-consumable-statistics\\.tools\\gradle-user-home\\caches\\8.10.2\\transforms\\8afd6cb62c71797d8faeca0522791414\\transformed\\activity-ktx-1.9.3-runtime.jar;E:\\work\\TuoZhu-consumable-statistics\\.tools\\gradle-user-home\\caches\\8.10.2\\transforms\\8bf370ccff90744967ce6b9dbdd600fb\\transformed\\material3-release-runtime.jar;E:\\work\\TuoZhu-consumable-statistics\\.tools\\gradle-user-home\\caches\\8.10.2\\transforms\\f5d490a793c10dc205049786ba89345e\\transformed\\material-release-runtime.jar;E:\\work\\TuoZhu-consumable-statistics\\.too
+Launcher Type: SUN_STANDARD
+
+[Global flags]
+     intx CICompilerCount                          = 12                                        {product} {ergonomic}
+     uint ConcGCThreads                            = 5                                         {product} {ergonomic}
+     uint G1ConcRefinementThreads                  = 20                                        {product} {ergonomic}
+   size_t G1HeapRegionSize                         = 1048576                                   {product} {ergonomic}
+    uintx GCDrainStackTargetSize                   = 64                                        {product} {ergonomic}
+   size_t InitialHeapSize                          = 534773760                                 {product} {ergonomic}
+   size_t MarkStackSize                            = 4194304                                   {product} {ergonomic}
+   size_t MaxHeapSize                              = 536870912                                 {product} {command line}
+   size_t MinHeapDeltaBytes                        = 1048576                                   {product} {ergonomic}
+   size_t MinHeapSize                              = 8388608                                   {product} {ergonomic}
+    uintx NonNMethodCodeHeapSize                   = 7602480                                {pd product} {ergonomic}
+    uintx NonProfiledCodeHeapSize                  = 122027880                              {pd product} {ergonomic}
+    uintx ProfiledCodeHeapSize                     = 122027880                              {pd product} {ergonomic}
+    uintx ReservedCodeCacheSize                    = 251658240                              {pd product} {ergonomic}
+     bool SegmentedCodeCache                       = true                                      {product} {ergonomic}
+   size_t SoftMaxHeapSize                          = 536870912                              {manageable} {ergonomic}
+     bool UseCompressedClassPointers               = true                           {product lp64_product} {ergonomic}
+     bool UseCompressedOops                        = true                           {product lp64_product} {ergonomic}
+     bool UseG1GC                                  = true                                      {product} {ergonomic}
+     bool UseLargePagesIndividualAllocation        = false                                  {pd product} {ergonomic}
+
+Logging:
+Log output configuration:
+ #0: stdout all=warning uptime,level,tags
+ #1: stderr all=off uptime,level,tags
+
+Environment Variables:
+JAVA_HOME=E:/work/TuoZhu-consumable-statistics/.tools/jdk/jdk-17
+CLASSPATH=E:\work\TuoZhu-consumable-statistics\.tools\gradle\gradle-8.10.2\lib\gradle-gradle-cli-main-8.10.2.jar
+PATH=C:\Users\Administrator\bin;D:\Git\mingw64\bin;D:\Git\usr\local\bin;D:\Git\usr\bin;D:\Git\usr\bin;D:\Git\mingw64\bin;D:\Git\usr\bin;C:\Users\Administrator\bin;E:\Python313\Scripts;E:\Python313;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0;C:\WINDOWS\System32\OpenSSH;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\dotnet;D:\nvm;D:\nodejs;D:\Go\bin;D:\Git\cmd;D:\Go\bin\bin;D:\Program Files\Tailscale;C:\Users\Administrator\AppData\Local\Microsoft\WindowsApps;D:\nvm;D:\nodejs;D:\Go\bin\go1.20.8\bin;D:\Microsoft VS Code\bin;D:\GoLand 2023.2.3\bin;D:\WebStorm 2024.3.4\bin;D:\JetBrains\PyCharm 2024.3.4\bin;D:\JetBrains\GoLand 2025.1\bin;D:\JetBrains\WebStorm 2025.1\bin;C:\Users\Administrator\AppData\Local\Programs\Ollama;D:\Microsoft VS Code Insiders\bin;D:\Git\usr\bin\vendor_perl;D:\Git\usr\bin\core_perl;C:\Users\Administrator\.claude\plugins\cache\claude-plugins-official\frontend-design\c5837a2c23b6\bin
+USERNAME=Administrator
+SHELL=D:\Git\bin\bash.exe
+OS=Windows_NT
+PROCESSOR_IDENTIFIER=Intel64 Family 6 Model 183 Stepping 1, GenuineIntel
+
+
+
+---------------  S Y S T E M  ---------------
+
+OS:
+ Windows 11 , 64 bit Build 22621 (10.0.22621.3672)
+OS uptime: 22 days 5:20 hours
+Hyper-V role detected
+
+CPU: total 28 (initial active 28) (14 cores per cpu, 2 threads per core) family 6 model 183 stepping 1 microcode 0x11f, cx8, cmov, fxsr, ht, mmx, 3dnowpref, sse, sse2, sse3, ssse3, sse4.1, sse4.2, popcnt, lzcnt, tsc, tscinvbit, avx, avx2, aes, erms, clmul, bmi1, bmi2, adx, sha, fma, vzeroupper, clflush, clflushopt, clwb, hv
+
+Memory: 4k page, system-wide physical 32609M (1090M free)
+TotalPageFile size 70917M (AvailPageFile size 415M)
+current process WorkingSet (physical memory assigned to process): 11M, peak: 11M
+current process commit charge ("private bytes"): 84M, peak: 594M
+
+vm_info: OpenJDK 64-Bit Server VM (17.0.2+8-86) for windows-amd64 JRE (17.0.2+8-86), built on Dec  7 2021 21:49:10 by "mach5one" with MS VC++ 16.8 / 16.9 (VS2019)
+
+END.

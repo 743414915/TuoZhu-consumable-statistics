@@ -6,25 +6,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val LightColors = lightColorScheme(
-    primary = ClayOrange,
+    primary = SlateBlue,
     onPrimary = Color.White,
-    primaryContainer = BurntOrange,
-    onPrimaryContainer = Color.White,
-    secondary = MossInk,
+    primaryContainer = SlateMuted,
+    onPrimaryContainer = SlateBlueDark,
+    secondary = SlateBlueDark,
     onSecondary = Color.White,
-    secondaryContainer = MistBlue,
-    onSecondaryContainer = Graphite,
+    secondaryContainer = SlateMuted,
+    onSecondaryContainer = TextPrimary,
     tertiary = WarningAmber,
-    onTertiary = Graphite,
-    background = IvoryMist,
-    onBackground = Graphite,
-    surface = Color(0xFFFFFCF8),
-    onSurface = Graphite,
-    surfaceVariant = Sandstone,
-    onSurfaceVariant = SoftStone,
-    outline = Color(0xFFCDBAA8),
+    onTertiary = TextPrimary,
+    background = PageBg,
+    onBackground = TextPrimary,
+    surface = SurfaceWhite,
+    onSurface = TextPrimary,
+    surfaceVariant = Color(0xFFF3F4F6),
+    onSurfaceVariant = TextSecondary,
+    outline = BorderDefault,
+    outlineVariant = BorderLight,
     error = SignalRed,
     onError = Color.White,
+    errorContainer = RedMuted,
+    onErrorContainer = SignalRed,
 )
 
 @Composable
@@ -35,4 +38,3 @@ fun TuoZhuConsumableStatisticsTheme(content: @Composable () -> Unit) {
         content = content,
     )
 }
-

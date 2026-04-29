@@ -50,10 +50,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tuozhu.consumablestatistics.data.PrintJobStatus
-import com.tuozhu.consumablestatistics.ui.theme.ClayOrange
-import com.tuozhu.consumablestatistics.ui.theme.MossInk
 import com.tuozhu.consumablestatistics.ui.theme.SignalRed
-import com.tuozhu.consumablestatistics.ui.theme.SuccessMint
+import com.tuozhu.consumablestatistics.ui.theme.SlateBlue
+import com.tuozhu.consumablestatistics.ui.theme.SlateBlueDark
+import com.tuozhu.consumablestatistics.ui.theme.SuccessGreen
 import kotlin.math.roundToInt
 
 @Composable
@@ -69,7 +69,7 @@ fun FocusedActiveRollSection(
             .padding(horizontal = 16.dp),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, ClayOrange.copy(alpha = 0.35f)),
+        border = BorderStroke(1.dp, SlateBlue.copy(alpha = 0.35f)),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -86,8 +86,8 @@ fun FocusedActiveRollSection(
                 }
                 SectionPill(
                     text = if (roll.isLowStock) "建议校准" else "跟踪中",
-                    containerColor = if (roll.isLowStock) SignalRed.copy(alpha = 0.12f) else SuccessMint.copy(alpha = 0.14f),
-                    contentColor = if (roll.isLowStock) SignalRed else MossInk,
+                    containerColor = if (roll.isLowStock) SignalRed.copy(alpha = 0.12f) else SuccessGreen.copy(alpha = 0.14f),
+                    contentColor = if (roll.isLowStock) SignalRed else SlateBlueDark,
                 )
             }
             Text(
@@ -105,7 +105,7 @@ fun FocusedActiveRollSection(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(50.dp)),
-                color = if (roll.isLowStock) SignalRed else SuccessMint,
+                color = if (roll.isLowStock) SignalRed else SuccessGreen,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
             )
             Text(
@@ -120,8 +120,8 @@ fun FocusedActiveRollSection(
                 OutlinedButton(
                     modifier = Modifier.weight(1f),
                     onClick = onConsumeClick,
-                    border = BorderStroke(1.dp, ClayOrange.copy(alpha = 0.45f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ClayOrange),
+                    border = BorderStroke(1.dp, SlateBlue.copy(alpha = 0.45f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SlateBlue),
                 ) {
                     Icon(Icons.Outlined.Inventory2, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
@@ -130,7 +130,7 @@ fun FocusedActiveRollSection(
                 Button(
                     modifier = Modifier.weight(1f),
                     onClick = onAdjustClick,
-                    colors = ButtonDefaults.buttonColors(containerColor = ClayOrange, contentColor = Color.White),
+                    colors = ButtonDefaults.buttonColors(containerColor = SlateBlue, contentColor = Color.White),
                 ) {
                     Icon(Icons.Outlined.Scale, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
@@ -165,11 +165,11 @@ fun InventoryRollCard(
     readOnly: Boolean = false,
 ) {
     val accent = when {
-        readOnly -> MossInk
+        readOnly -> SlateBlueDark
         roll.isLowStock -> SignalRed
         else -> colorFromHexCompat(roll.colorHex)
     }
-    val progressColor = if (roll.isLowStock && !readOnly) SignalRed else SuccessMint
+    val progressColor = if (roll.isLowStock && !readOnly) SignalRed else SuccessGreen
 
     Card(
         modifier = Modifier
@@ -228,15 +228,15 @@ fun InventoryRollCard(
                         },
                         containerColor = when {
                             readOnly -> MaterialTheme.colorScheme.secondaryContainer
-                            roll.isActive -> ClayOrange.copy(alpha = 0.14f)
+                            roll.isActive -> SlateBlue.copy(alpha = 0.14f)
                             roll.isLowStock -> SignalRed.copy(alpha = 0.12f)
-                            else -> SuccessMint.copy(alpha = 0.13f)
+                            else -> SuccessGreen.copy(alpha = 0.13f)
                         },
                         contentColor = when {
                             readOnly -> MaterialTheme.colorScheme.onSecondaryContainer
-                            roll.isActive -> ClayOrange
+                            roll.isActive -> SlateBlue
                             roll.isLowStock -> SignalRed
-                            else -> MossInk
+                            else -> SlateBlueDark
                         },
                         icon = if (roll.isLowStock && !readOnly) {
                             {
@@ -321,8 +321,8 @@ fun InventoryRollCard(
                             OutlinedButton(
                                 modifier = Modifier.weight(1f),
                                 onClick = onConsumeClick,
-                                border = BorderStroke(1.dp, ClayOrange.copy(alpha = 0.45f)),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = ClayOrange),
+                                border = BorderStroke(1.dp, SlateBlue.copy(alpha = 0.45f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = SlateBlue),
                             ) {
                                 Icon(Icons.Outlined.Inventory2, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -331,7 +331,7 @@ fun InventoryRollCard(
                             Button(
                                 modifier = Modifier.weight(1f),
                                 onClick = onAdjustClick,
-                                colors = ButtonDefaults.buttonColors(containerColor = ClayOrange, contentColor = Color.White),
+                                colors = ButtonDefaults.buttonColors(containerColor = SlateBlue, contentColor = Color.White),
                             ) {
                                 Icon(Icons.Outlined.Scale, contentDescription = null)
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -342,10 +342,10 @@ fun InventoryRollCard(
                             OutlinedButton(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = onSetActiveClick,
-                                border = BorderStroke(1.dp, ClayOrange.copy(alpha = 0.55f)),
+                                border = BorderStroke(1.dp, SlateBlue.copy(alpha = 0.55f)),
                                 colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = ClayOrange.copy(alpha = 0.08f),
-                                    contentColor = ClayOrange,
+                                    containerColor = SlateBlue.copy(alpha = 0.08f),
+                                    contentColor = SlateBlue,
                                 ),
                             ) {
                                 Text("设为活动卷")
@@ -469,8 +469,8 @@ fun PrintTaskHistorySummaryCard(
             }
             SectionPill(
                 text = "最近任务",
-                containerColor = ClayOrange.copy(alpha = 0.12f),
-                contentColor = ClayOrange,
+                containerColor = SlateBlue.copy(alpha = 0.12f),
+                contentColor = SlateBlue,
             )
         }
     }
@@ -493,7 +493,7 @@ fun RecentPrintTimelineSection(tasks: List<PrintTaskTimelineUiModel>) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Outlined.History, contentDescription = null, tint = ClayOrange)
+                Icon(Icons.Outlined.History, contentDescription = null, tint = SlateBlue)
                 Column {
                     Text("打印任务时间线", style = MaterialTheme.typography.titleLarge)
                     Text(
@@ -515,11 +515,11 @@ fun RecentPrintTimelineSection(tasks: List<PrintTaskTimelineUiModel>) {
 
 @Composable
 private fun RecentPrintTimelineItem(task: PrintTaskTimelineUiModel) {
-    val statusColor = if (task.status == PrintJobStatus.CONFIRMED) MossInk else ClayOrange
+    val statusColor = if (task.status == PrintJobStatus.CONFIRMED) SlateBlueDark else SlateBlue
     val statusContainer = if (task.status == PrintJobStatus.CONFIRMED) {
-        SuccessMint.copy(alpha = 0.14f)
+        SuccessGreen.copy(alpha = 0.14f)
     } else {
-        ClayOrange.copy(alpha = 0.14f)
+        SlateBlue.copy(alpha = 0.14f)
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
@@ -551,8 +551,8 @@ private fun RecentPrintTimelineItem(task: PrintTaskTimelineUiModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionPill(
                 text = "${task.estimatedUsageGrams}g",
-                containerColor = ClayOrange.copy(alpha = 0.14f),
-                contentColor = ClayOrange,
+                containerColor = SlateBlue.copy(alpha = 0.14f),
+                contentColor = SlateBlue,
             )
             task.targetMaterial?.takeIf { it.isNotBlank() }?.let { material ->
                 SectionPill(
@@ -725,7 +725,7 @@ fun RecentEventSection(
 }
 
 private fun colorFromHexCompat(value: String): Color {
-    return runCatching { Color(parseColor(value)) }.getOrElse { ClayOrange }
+    return runCatching { Color(parseColor(value)) }.getOrElse { SlateBlue }
 }
 
 @Composable

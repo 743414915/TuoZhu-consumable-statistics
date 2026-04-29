@@ -40,6 +40,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,17 +51,21 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tuozhu.consumablestatistics.ui.screen.HistoryPage
 import com.tuozhu.consumablestatistics.ui.screen.InventoryPage
 import com.tuozhu.consumablestatistics.ui.screen.OverviewPage
 import com.tuozhu.consumablestatistics.ui.screen.SyncPage
-import com.tuozhu.consumablestatistics.ui.theme.ClayOrange
-import com.tuozhu.consumablestatistics.ui.theme.IvoryMist
+import com.tuozhu.consumablestatistics.ui.theme.BorderLight
+import com.tuozhu.consumablestatistics.ui.theme.PageBg
+import com.tuozhu.consumablestatistics.ui.theme.SlateBlue
+import com.tuozhu.consumablestatistics.ui.theme.SlateMuted
+import com.tuozhu.consumablestatistics.ui.theme.TextMuted
+import com.tuozhu.consumablestatistics.ui.theme.TextSecondary
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -114,7 +119,7 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
                 context.contentResolver.openOutputStream(uri)?.use { it.write(pendingExportJson!!.toByteArray(Charsets.UTF_8)) }
                 viewModel.clearExportData()
                 pendingExportJson = null
-                Toast.makeText(context, "数据导出成功", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "导出成功", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, "导出失败：${e.message}", Toast.LENGTH_LONG).show()
             }
@@ -127,10 +132,10 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
         if (uri != null) {
             try {
                 val json = context.contentResolver.openInputStream(uri)?.use { it.bufferedReader(Charsets.UTF_8).readText() }
-                if (json.isNullOrBlank()) Toast.makeText(context, "无法读取文件内容", Toast.LENGTH_SHORT).show()
+                if (json.isNullOrBlank()) Toast.makeText(context, "无法读取文件", Toast.LENGTH_SHORT).show()
                 else viewModel.prepareImport(json)
             } catch (e: Exception) {
-                Toast.makeText(context, "读取文件失败：${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "读取失败：${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -147,11 +152,7 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
         viewModel.consumeMessage()
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(IvoryMist, Color(0xFFFFFBF6), Color(0xFFF3E4D6)))),
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(PageBg)) {
         Scaffold(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -159,19 +160,24 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
                 CenterAlignedTopAppBar(
                     title = {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(currentPage.title, style = MaterialTheme.typography.headlineMedium)
-                            Text(currentPage.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(currentPage.title, style = MaterialTheme.typography.titleMedium)
+                            Text(currentPage.subtitle, style = MaterialTheme.typography.bodySmall, color = TextMuted)
                         }
                     },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = PageBg,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    ),
                 )
             },
             floatingActionButton = {
                 if (showAddFab) {
                     FloatingActionButton(
                         onClick = { addDialogVisible = true },
-                        containerColor = ClayOrange,
+                        containerColor = SlateBlue,
                         contentColor = Color.White,
-                    ) { Icon(Icons.Outlined.Add, contentDescription = "新增耗材卷") }
+                        shape = RoundedCornerShape(16.dp),
+                    ) { Icon(Icons.Outlined.Add, "新增") }
                 }
             },
             bottomBar = {
@@ -180,7 +186,7 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
         ) { innerPadding ->
             AnimatedContent(
                 targetState = currentPage,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().padding(innerPadding),
                 transitionSpec = {
                     val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
                     (slideInHorizontally(tween(280)) { width -> direction * width / 6 } + fadeIn(tween(200))) togetherWith
@@ -191,7 +197,6 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
                 when (page) {
                     ConsumableRootPage.OVERVIEW -> OverviewPage(
                         state = state,
-                        modifier = Modifier.padding(innerPadding),
                         onOpenSync = { currentPage = ConsumableRootPage.SYNC },
                         onOpenHistory = { currentPage = ConsumableRootPage.HISTORY },
                         onConsumeClick = { consumeRollId = it },
@@ -199,137 +204,102 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
                         onDeleteClick = { deleteRollId = it },
                     )
                     ConsumableRootPage.INVENTORY -> InventoryPage(
-                        state = state,
-                        shelfRolls = shelfRolls,
-                        shelfExpanded = shelfExpanded,
-                        allowShelfCollapse = allowShelfCollapse,
-                        archivedExpanded = archivedExpanded,
-                        modifier = Modifier.padding(innerPadding),
+                        state = state, shelfRolls = shelfRolls, shelfExpanded = shelfExpanded,
+                        allowShelfCollapse = allowShelfCollapse, archivedExpanded = archivedExpanded,
                         onToggleShelfExpanded = { if (allowShelfCollapse) shelfExpandedOverride = !shelfExpanded },
                         onToggleArchivedExpanded = { if (state.archivedRolls.size > 1) archivedExpandedOverride = !archivedExpanded },
-                        onConsumeClick = { consumeRollId = it },
-                        onAdjustClick = { adjustRollId = it },
-                        onDeleteClick = { deleteRollId = it },
-                        onSetActiveClick = viewModel::setActiveRoll,
+                        onConsumeClick = { consumeRollId = it }, onAdjustClick = { adjustRollId = it },
+                        onDeleteClick = { deleteRollId = it }, onSetActiveClick = viewModel::setActiveRoll,
                         onExport = viewModel::prepareExport,
                         onImport = { openDocumentLauncher.launch(arrayOf("application/json")) },
                     )
                     ConsumableRootPage.SYNC -> SyncPage(
-                        syncStatus = state.syncStatus,
-                        pendingJobs = state.pendingPrintJobs,
-                        activeRoll = state.activeRoll,
-                        modifier = Modifier.padding(innerPadding),
-                        onSaveEndpoint = viewModel::saveDesktopSyncAddress,
-                        onPullSync = viewModel::pullSync,
-                        onDiscoverLan = viewModel::autoDiscoverLanDesktop,
-                        onScanPairing = viewModel::pairWithScannedDesktopAddress,
-                        onConfirmJob = viewModel::confirmPrintJob,
-                        onDeleteJob = { deleteJobId = it },
-                        isRefreshing = isRefreshing,
-                        onRefresh = viewModel::pullSync,
+                        syncStatus = state.syncStatus, pendingJobs = state.pendingPrintJobs, activeRoll = state.activeRoll,
+                        onSaveEndpoint = viewModel::saveDesktopSyncAddress, onPullSync = viewModel::pullSync,
+                        onDiscoverLan = viewModel::autoDiscoverLanDesktop, onScanPairing = viewModel::pairWithScannedDesktopAddress,
+                        onConfirmJob = viewModel::confirmPrintJob, onDeleteJob = { deleteJobId = it },
+                        isRefreshing = isRefreshing, onRefresh = viewModel::pullSync,
                     )
-                    ConsumableRootPage.HISTORY -> HistoryPage(
-                        state = state,
-                        modifier = Modifier.padding(innerPadding),
-                    )
+                    ConsumableRootPage.HISTORY -> HistoryPage(state = state)
                 }
             }
         }
     }
 
     // ── Dialogs ──
-
     if (addDialogVisible) {
         AddRollDialog(
             onDismiss = { addDialogVisible = false },
-            onConfirm = { input ->
-                viewModel.addRoll(input)
-                addDialogVisible = false
-            },
+            onConfirm = { input -> viewModel.addRoll(input); addDialogVisible = false },
         )
     }
 
-    val consumeRoll = state.rolls.firstOrNull { it.id == consumeRollId }
-    if (consumeRoll != null) {
+    state.rolls.firstOrNull { it.id == consumeRollId }?.let { roll ->
         RefinedWeightChangeDialog(
             title = "登记耗材", confirmLabel = "保存",
-            description = "记录本次打印大约消耗的克重，用于维持库存估算。",
-            rollName = consumeRoll.displayName, initialValue = "",
-            valueLabel = "本次补记消耗（g）",
-            valueSupportingText = "请输入大于 0 的克重。",
-            noteSupportingText = "可选，例如：补录旧任务、试打件、失败件。",
+            description = "记录本次打印大约消耗的克重。", rollName = roll.displayName, initialValue = "",
             onDismiss = { consumeRollId = -1L },
-            onConfirm = { grams, note -> viewModel.consumeRoll(consumeRoll.id, grams, note); consumeRollId = -1L },
+            onConfirm = { grams, note -> viewModel.consumeRoll(roll.id, grams, note); consumeRollId = -1L },
         )
     }
 
-    val adjustRoll = state.rolls.firstOrNull { it.id == adjustRollId }
-    if (adjustRoll != null) {
+    state.rolls.firstOrNull { it.id == adjustRollId }?.let { roll ->
         RefinedWeightChangeDialog(
             title = "校准余量", confirmLabel = "校准",
-            description = "输入你刚刚实际称到的剩余克重，系统会把它作为新的基准值。",
-            rollName = adjustRoll.displayName,
-            initialValue = adjustRoll.estimatedRemainingGrams.toString(),
-            valueLabel = "当前实称重量（g）",
-            valueSupportingText = "可输入 0g，表示这卷已经用完。",
-            noteSupportingText = "可选，例如：重新复核、刚换秤。",
-            allowZero = true,
+            description = "输入实际称到的剩余克重作为新基准。", rollName = roll.displayName,
+            initialValue = roll.estimatedRemainingGrams.toString(), allowZero = true,
             onDismiss = { adjustRollId = -1L },
-            onConfirm = { grams, note -> viewModel.recalibrateRoll(adjustRoll.id, grams, note); adjustRollId = -1L },
+            onConfirm = { grams, note -> viewModel.recalibrateRoll(roll.id, grams, note); adjustRollId = -1L },
         )
     }
 
-    val deleteRoll = state.rolls.firstOrNull { it.id == deleteRollId }
-    if (deleteRoll != null) {
+    state.rolls.firstOrNull { it.id == deleteRollId }?.let { roll ->
         ArchiveRollDialog(
-            rollName = deleteRoll.displayName,
-            isActive = deleteRoll.isActive,
+            rollName = roll.displayName, isActive = roll.isActive,
             onDismiss = { deleteRollId = -1L },
-            onConfirm = { viewModel.deleteRoll(deleteRoll.id); deleteRollId = -1L },
+            onConfirm = { viewModel.deleteRoll(roll.id); deleteRollId = -1L },
         )
     }
 
     importPreview?.let { preview ->
         ImportPreviewDialog(
-            rollCount = preview.rollCount,
-            printJobCount = preview.printJobCount,
-            onDismiss = viewModel::cancelImport,
-            onConfirm = viewModel::confirmImport,
+            rollCount = preview.rollCount, printJobCount = preview.printJobCount,
+            onDismiss = viewModel::cancelImport, onConfirm = viewModel::confirmImport,
         )
     }
 
-    val deleteJob = state.pendingPrintJobs.firstOrNull { it.id == deleteJobId }
-    if (deleteJob != null) {
+    state.pendingPrintJobs.firstOrNull { it.id == deleteJobId }?.let { job ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { deleteJobId = -1L },
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(24.dp),
             containerColor = MaterialTheme.colorScheme.surface,
-            title = { Text("删除待确认任务", style = MaterialTheme.typography.headlineSmall) },
+            title = { Text("删除待确认任务", style = MaterialTheme.typography.titleLarge) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("确认删除「${deleteJob.modelName}」吗？", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
-                    Text("删除后该打印任务将永久移除，不会扣减任何耗材卷。这个操作不可撤销。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("确认删除「${job.modelName}」吗？", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("删除后该打印任务将永久移除，不可撤销。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.deletePendingPrintJob(deleteJob.id); deleteJobId = -1L }) { Text("确认删除", color = Color(0xFFB43A2E)) }
+                TextButton(onClick = { viewModel.deletePendingPrintJob(job.id); deleteJobId = -1L }) {
+                    Text("确认删除", color = com.tuozhu.consumablestatistics.ui.theme.SignalRed)
+                }
             },
             dismissButton = { TextButton(onClick = { deleteJobId = -1L }) { Text("取消") } },
         )
     }
 }
 
-// ── Bottom Tab Bar ──
-
 @Composable
-private fun BottomTabBar(
-    currentPage: ConsumableRootPage,
-    onSelectPage: (ConsumableRootPage) -> Unit,
-) {
-    Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f), tonalElevation = 8.dp) {
+private fun BottomTabBar(currentPage: ConsumableRootPage, onSelectPage: (ConsumableRootPage) -> Unit) {
+    Surface(
+        color = PageBg.copy(alpha = 0.94f),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             TabItem(Modifier.weight(1f), currentPage == ConsumableRootPage.OVERVIEW, "总览", { Icon(Icons.Outlined.Home, null) }) { onSelectPage(ConsumableRootPage.OVERVIEW) }
             TabItem(Modifier.weight(1f), currentPage == ConsumableRootPage.INVENTORY, "卷库", { Icon(Icons.Outlined.Inventory2, null) }) { onSelectPage(ConsumableRootPage.INVENTORY) }
@@ -340,23 +310,17 @@ private fun BottomTabBar(
 }
 
 @Composable
-private fun TabItem(
-    modifier: Modifier,
-    selected: Boolean,
-    label: String,
-    icon: @Composable () -> Unit,
-    onClick: () -> Unit,
-) {
+private fun TabItem(modifier: Modifier, selected: Boolean, label: String, icon: @Composable () -> Unit, onClick: () -> Unit) {
     TextButton(
         modifier = modifier.heightIn(min = 48.dp),
         onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-            containerColor = if (selected) ClayOrange.copy(alpha = 0.14f) else Color.Transparent,
-            contentColor = if (selected) ClayOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+            containerColor = if (selected) SlateMuted else Color.Transparent,
+            contentColor = if (selected) SlateBlue else TextMuted,
         ),
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             icon()
             Text(label, style = MaterialTheme.typography.labelMedium)
         }

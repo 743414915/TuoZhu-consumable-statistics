@@ -2,16 +2,28 @@ package com.tuozhu.consumablestatistics.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val ClayOrange = Color(0xFFD86A3D)
-val BurntOrange = Color(0xFFAA4E2A)
-val SignalRed = Color(0xFFB43A2E)
-val IvoryMist = Color(0xFFF6F0E7)
-val Sandstone = Color(0xFFE9DDCE)
-val MossInk = Color(0xFF30443F)
-val ForestSlate = Color(0xFF485954)
-val Graphite = Color(0xFF1F2321)
-val SoftStone = Color(0xFF72695F)
-val MistBlue = Color(0xFFD5E4E1)
-val SuccessMint = Color(0xFF76A08B)
-val WarningAmber = Color(0xFFF4BA59)
+// Slate Blue primary
+val SlateBlue = Color(0xFF4A6572)
+val SlateBlueDark = Color(0xFF37474F)
+val SlateBlueLight = Color(0xFF5B7D8C)
 
+// Semantic
+val SignalRed = Color(0xFFC94A3E)
+val WarningAmber = Color(0xFFF0B84D)
+val SuccessGreen = Color(0xFF6BAF8A)
+
+// Neutral
+val White = Color(0xFFFFFFFF)
+val PageBg = Color(0xFFF9FAFB)
+val SurfaceWhite = Color(0xFFFFFFFF)
+val BorderLight = Color(0xFFE5E7EB)
+val BorderDefault = Color(0xFFD1D5DB)
+val TextPrimary = Color(0xFF1A1C1A)
+val TextSecondary = Color(0xFF6B7280)
+val TextMuted = Color(0xFF9CA3AF)
+
+// Accent backgrounds (muted)
+val SlateMuted = Color(0xFFEDF1F3)
+val RedMuted = Color(0xFFFEF2F2)
+val AmberMuted = Color(0xFFFFFBEB)
+val GreenMuted = Color(0xFFECFDF5)
