@@ -5,7 +5,7 @@
       :service-running="state.serviceRunning"
       :log-count="state.logLines.length"
       @navigate="activeTab = $event"
-      @open-config="showConfig = true"
+      @open-config="openConfig"
     />
 
     <main class="main-content">
@@ -124,7 +124,7 @@
     <!-- Config dialog -->
     <ConfigDialog
       :visible="showConfig"
-      :config="configSnapshot"
+      :config="configData"
       @close="showConfig = false"
       @save="onConfigSave"
     />
@@ -144,9 +144,16 @@ import type { StateSnapshot, EndpointInfo } from './composables/useIpc'
 import { defaultSnapshot } from './composables/useIpc'
 
 const activeTab = ref('dashboard')
-const showConfig = ref(false)
 
 const state = reactive<StateSnapshot>({ ...defaultSnapshot })
+const showConfig = ref(false)
+const configData = ref<GuiConfig>({
+  agentRoot: '',
+  port: 8823,
+  maxAgeDays: 7,
+  useSample: false,
+  gcodeRoots: [],
+})
 let cleanup: (() => void) | null = null
 
 const fallbackEndpoint: EndpointInfo = {
@@ -155,23 +162,20 @@ const fallbackEndpoint: EndpointInfo = {
   reachable: false,
 }
 
-// Reconstruct config snapshot for ConfigDialog
-const configSnapshot = computed<GuiConfig>(() => ({
-  agentRoot: '',
-  port: 8823,
-  maxAgeDays: 7,
-  useSample: false,
-  gcodeRoots: [],
-}))
-
-async function invoke(channel: string, ...args: any[]) {
+async function invoke<T>(channel: string, ...args: any[]): Promise<T | null> {
   const api = (window as any).electronAPI
-  if (!api) return
+  if (!api) return null
   try {
-    await api.invoke(channel, ...args)
+    return (await api.invoke(channel, ...args)) as T
   } catch {
-    // IPC error — ignore
+    return null
   }
+}
+
+async function openConfig() {
+  const cfg = await invoke<GuiConfig>('get-config')
+  if (cfg) configData.value = cfg
+  showConfig.value = true
 }
 
 async function onConfigSave(partial: Partial<GuiConfig>) {

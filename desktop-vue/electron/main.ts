@@ -80,18 +80,24 @@ function psExe(): string {
   if (sr) { const c = path.join(sr, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'); if (fs.existsSync(c)) return c }
   return 'powershell.exe'
 }
+function psQuote(s: string): string { return `'${s.replace(/'/g, "''")}'` }
+function psArray(items: string[]): string { return `@(${items.map(psQuote).join(',')})` }
 function buildPsCmd(script: string, args: string[]): string {
   const pre = '$utf8=[System.Text.UTF8Encoding]::new($false);[Console]::InputEncoding=$utf8;[Console]::OutputEncoding=$utf8;$OutputEncoding=$utf8;'
-  const lit = `'${script.replace(/'/g, "''")}'`
-  const parts = args.map(a => /^-[A-Za-z][A-Za-z0-9]*$/.test(a) ? a : `'${a.replace(/'/g, "''")}'`)
+  const lit = psQuote(script)
+  const parts = args.map(a => {
+    if (/^-[A-Za-z][A-Za-z0-9]*$/.test(a)) return a
+    if (a.startsWith('@(')) return a
+    return psQuote(a)
+  })
   return `${pre}& ${lit} ${parts.join(' ')}`
 }
 function syncArgs(explicit: string[] = []): string[] {
   const a = ['-MaxFileAgeDays', String(config.maxAgeDays)]
   if (config.useSample) { a.push('-UseSample') } else {
     a.push('-UseBambuGcode')
-    if (explicit.length) { a.push('-GcodePaths', ...explicit.map(p => path.resolve(p))) }
-    else if (config.gcodeRoots.length) { a.push('-GcodeSearchRoots', ...config.gcodeRoots) }
+    if (explicit.length) { a.push('-GcodePaths', psArray(explicit.map(p => path.resolve(p)))) }
+    else if (config.gcodeRoots.length) { a.push('-GcodeSearchRoots', psArray(config.gcodeRoots)) }
   }
   return a
 }
@@ -292,21 +298,47 @@ function buildPreview(jobs: any[]): string {
 }
 
 async function snapshot(): Promise<StateSnapshot> {
-  const ob = readText(path.join(config.agentRoot, 'outbox', 'desktop-outbox.json')), sr = readText(path.join(config.agentRoot, 'state', 'state.json'))
-  const stateObj = jsonSafe<any>(sr, {}), jobs = jsonSafe<any[]>((ob.trim() || '[]'), [])
-  const warnings: string[] = Array.isArray(stateObj.warnings) ? stateObj.warnings : []
-  const ua: number = typeof stateObj.updatedAt === 'number' ? stateObj.updatedAt : 0
-  const { primary, lan } = await selectEndpoints()
-  return {
-    serviceRunning, syncBusy: isSyncBusy(), watchStatus,
-    pendingDrafts: jobs.length, warningCount: warnings.length,
-    lastSyncLabel: ua > 0 ? fmtTime(ua) : '尚未同步',
-    previewText: buildPreview(jobs),
-    warningText: warnings.length ? warnings.join('\n') : '暂无警告。',
-    primaryEndpoint: primary ? { label: primary.label, url: primary.url, reachable: primary.reachable } : null,
-    lanEndpoint: lan ? { label: lan.label, url: lan.url, reachable: lan.reachable } : null,
-    pairingUrl: primary ? primary.url : `http://localhost:${config.port}`,
-    logLines: [...logLines],
+  try {
+    const ob = readText(path.join(config.agentRoot, 'outbox', 'desktop-outbox.json'))
+    const sr = readText(path.join(config.agentRoot, 'state', 'state.json'))
+    const stateObj = jsonSafe<any>(sr, {})
+    const jobs = jsonSafe<any[]>((ob.trim() || '[]'), [])
+    const warnings: string[] = Array.isArray(stateObj.warnings) ? stateObj.warnings : []
+    const ua: number = typeof stateObj.updatedAt === 'number' ? stateObj.updatedAt : 0
+
+    let primary: EndpointCandidate | null = null
+    let lan: EndpointCandidate | null = null
+    try {
+      const eps = await selectEndpoints()
+      primary = eps.primary
+      lan = eps.lan
+    } catch (e) {
+      log('端点发现失败: ' + e)
+    }
+
+    return {
+      serviceRunning,
+      syncBusy: isSyncBusy(),
+      watchStatus,
+      pendingDrafts: jobs.length,
+      warningCount: warnings.length,
+      lastSyncLabel: ua > 0 ? fmtTime(ua) : '尚未同步',
+      previewText: buildPreview(jobs),
+      warningText: warnings.length ? warnings.join('\n') : '暂无警告。',
+      primaryEndpoint: primary ? { label: primary.label, url: primary.url, reachable: primary.reachable } : null,
+      lanEndpoint: lan ? { label: lan.label, url: lan.url, reachable: lan.reachable } : null,
+      pairingUrl: primary ? primary.url : '',
+      logLines: [...logLines],
+    }
+  } catch (e) {
+    log('snapshot 整体异常: ' + e)
+    return {
+      serviceRunning, syncBusy: isSyncBusy(), watchStatus: null,
+      pendingDrafts: 0, warningCount: 0,
+      lastSyncLabel: '读取异常', previewText: '', warningText: '',
+      primaryEndpoint: null, lanEndpoint: null,
+      pairingUrl: '', logLines: [...logLines],
+    }
   }
 }
 
@@ -316,6 +348,13 @@ function registerIpc(): void {
   ipcMain.handle('start-service', () => { if (serviceRunning) return; try { startHttp(); startWatcher(); serviceRunning = true; spawnSync('startup'); log('服务已启动。') } catch (e) { log('启动失败：' + e); serviceRunning = false } })
   ipcMain.handle('stop-service', () => { if (!serviceRunning) return; log('正在停止服务...'); stopHttp(); stopWatcher(); if (syncProcess) { try { syncProcess.kill() } catch { /* ok */ } syncProcess = null } queuedExplicitPaths = []; queuedFullSync = false; serviceRunning = false })
   ipcMain.handle('manual-scan', () => { log('[扫描] 手动触发...'); spawnSync('manual') })
+  ipcMain.handle('get-config', () => ({
+    agentRoot: config.agentRoot,
+    port: config.port,
+    maxAgeDays: config.maxAgeDays,
+    useSample: config.useSample,
+    gcodeRoots: [...config.gcodeRoots],
+  }))
   ipcMain.handle('update-config', (_e, partial: Partial<GuiConfig>) => {
     if (!partial || typeof partial !== 'object') return
     if (typeof partial.agentRoot === 'string' && partial.agentRoot) config.agentRoot = partial.agentRoot
