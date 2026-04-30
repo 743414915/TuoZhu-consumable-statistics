@@ -484,6 +484,23 @@ class ConsumableViewModel(
         importPreviewState.value = null
     }
 
+    // Custom materials
+    fun observeCustomMaterials() = repository.observeCustomMaterials()
+
+    fun addCustomMaterial(name: String) {
+        viewModelScope.launch {
+            repository.addCustomMaterial(name)
+            messageState.value = "已添加自定义材料：$name"
+        }
+    }
+
+    fun removeCustomMaterial(name: String) {
+        viewModelScope.launch {
+            repository.removeCustomMaterial(name)
+            messageState.value = "已移除自定义材料：$name"
+        }
+    }
+
     fun observeExportJson() = exportJsonState
 
     fun observeImportPreview() = importPreviewState

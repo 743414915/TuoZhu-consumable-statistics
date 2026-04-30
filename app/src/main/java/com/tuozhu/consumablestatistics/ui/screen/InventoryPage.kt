@@ -57,6 +57,7 @@ fun InventoryPage(
     onSetActiveClick: (Long) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    onManageMaterials: () -> Unit = {},
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -94,7 +95,24 @@ fun InventoryPage(
         if (state.archivedRolls.isNotEmpty()) {
             item { ArchivedRollsSection(rolls = state.archivedRolls, expanded = archivedExpanded, allowCollapse = state.archivedRolls.size > 1, onToggleExpanded = onToggleArchivedExpanded) }
         }
+        item { MaterialManageCard(onManageMaterials) }
         item { BackupCard(onExport, onImport) }
+    }
+}
+
+@Composable
+private fun MaterialManageCard(onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, BorderLight),
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("自定义材料", style = MaterialTheme.typography.titleMedium)
+            Text("添加和管理你自己的耗材材料类型，会出现在新增耗材卷的材料选项中。", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+            TextButton(onClick = onClick) { Text("管理材料") }
+        }
     }
 }
 

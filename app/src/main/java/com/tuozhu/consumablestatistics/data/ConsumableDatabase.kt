@@ -12,8 +12,9 @@ import androidx.room.TypeConverters
         FilamentEventEntity::class,
         PrintJobEntity::class,
         SyncStateEntity::class,
+        CustomMaterialEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(FilamentTypeConverters::class)

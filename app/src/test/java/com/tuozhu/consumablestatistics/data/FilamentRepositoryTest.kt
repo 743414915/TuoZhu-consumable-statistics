@@ -968,6 +968,24 @@ private class FakeFilamentDao : FilamentDao {
         )
     }
 
+    // Custom materials
+    private val customMaterials = mutableListOf<CustomMaterialEntity>()
+
+    override fun observeCustomMaterials(): Flow<List<CustomMaterialEntity>> {
+        return MutableStateFlow(customMaterials.toList())
+    }
+
+    override suspend fun getCustomMaterials(): List<CustomMaterialEntity> = customMaterials.toList()
+
+    override suspend fun insertCustomMaterial(material: CustomMaterialEntity) {
+        customMaterials.removeAll { it.name == material.name }
+        customMaterials.add(material)
+    }
+
+    override suspend fun deleteCustomMaterial(name: String) {
+        customMaterials.removeAll { it.name == name }
+    }
+
     fun printJobsSnapshot(): List<PrintJobEntity> = printJobs.toList()
 
     fun eventsSnapshot(): List<FilamentEventEntity> = events.toList()

@@ -45,6 +45,7 @@ data class ExportPrintJob(
 data class ImportData(
     val rolls: List<ExportRoll>,
     val printJobs: List<ExportPrintJob>,
+    val customMaterials: List<String> = emptyList(),
 )
 
 data class ImportResult(
@@ -60,6 +61,7 @@ object DataExportImport {
         rolls: List<FilamentRollEntity>,
         eventsByRoll: Map<Long, List<FilamentEventEntity>>,
         printJobs: List<PrintJobEntity>,
+        customMaterials: List<String> = emptyList(),
     ): String {
         val root = JSONObject()
         root.put("version", VERSION)
@@ -121,6 +123,10 @@ object DataExportImport {
             jobsArray.put(jobJson)
         }
         root.put("printJobs", jobsArray)
+
+        if (customMaterials.isNotEmpty()) {
+            root.put("customMaterials", JSONArray(customMaterials))
+        }
 
         return root.toString(2)
     }
@@ -188,7 +194,15 @@ object DataExportImport {
             )
         }
 
-        return ImportData(rolls = rolls, printJobs = printJobs)
+        val customMaterials = mutableListOf<String>()
+        val cmArray = root.optJSONArray("customMaterials")
+        if (cmArray != null) {
+            for (i in 0 until cmArray.length()) {
+                customMaterials.add(cmArray.getString(i))
+            }
+        }
+
+        return ImportData(rolls = rolls, printJobs = printJobs, customMaterials = customMaterials)
     }
 
     private inline fun <reified T : Enum<T>> parseEnum(name: String, fallback: T): T {

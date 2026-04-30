@@ -110,6 +110,13 @@ enum class SyncConnectionStatus {
     ERROR,
 }
 
+@Entity(tableName = "custom_materials")
+data class CustomMaterialEntity(
+    @PrimaryKey
+    val name: String,
+    val createdAt: Long,
+)
+
 const val ARCHIVED_ROLL_NOTE_PREFIX = "[[ARCHIVED]]"
 
 fun FilamentRollEntity.isArchivedRoll(): Boolean = notes.startsWith(ARCHIVED_ROLL_NOTE_PREFIX)

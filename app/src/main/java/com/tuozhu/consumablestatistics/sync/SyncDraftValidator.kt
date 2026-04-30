@@ -77,7 +77,7 @@ object SyncDraftValidator {
             return "estimatedUsageGrams 必须大于 0"
         }
         if (!SupportedMaterials.isSupported(draft.targetMaterial)) {
-            return "targetMaterial 仅支持 ${SupportedMaterials.all.joinToString()}"
+            return "targetMaterial 仅支持 ${SupportedMaterials.builtIn.joinToString()}"
         }
         if (draft.source == SyncSourceType.MANUAL) {
             return "source 不能是 MANUAL"

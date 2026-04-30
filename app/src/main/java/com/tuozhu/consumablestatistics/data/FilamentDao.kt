@@ -103,6 +103,19 @@ interface FilamentDao {
     @Query("SELECT * FROM print_jobs WHERE status = 'CONFIRMED' ORDER BY confirmedAt ASC, id ASC")
     suspend fun getAllConfirmedPrintJobs(): List<PrintJobEntity>
 
+    // Custom materials
+    @Query("SELECT * FROM custom_materials ORDER BY name ASC")
+    fun observeCustomMaterials(): Flow<List<CustomMaterialEntity>>
+
+    @Query("SELECT * FROM custom_materials ORDER BY name ASC")
+    suspend fun getCustomMaterials(): List<CustomMaterialEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCustomMaterial(material: CustomMaterialEntity)
+
+    @Query("DELETE FROM custom_materials WHERE name = :name")
+    suspend fun deleteCustomMaterial(name: String)
+
     @Transaction
     suspend fun updateRollAndInsertEvent(roll: FilamentRollEntity, event: FilamentEventEntity) {
         updateRoll(roll)

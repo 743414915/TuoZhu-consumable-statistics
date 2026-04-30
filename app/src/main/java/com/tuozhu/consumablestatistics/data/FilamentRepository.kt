@@ -396,13 +396,27 @@ class FilamentRepository(
         runInTransaction(block)
     }
 
+    // Custom materials
+    fun observeCustomMaterials() = dao.observeCustomMaterials()
+
+    suspend fun getCustomMaterials() = dao.getCustomMaterials()
+
+    suspend fun addCustomMaterial(name: String) {
+        dao.insertCustomMaterial(CustomMaterialEntity(name = name.trim(), createdAt = System.currentTimeMillis()))
+    }
+
+    suspend fun removeCustomMaterial(name: String) {
+        dao.deleteCustomMaterial(name)
+    }
+
     suspend fun buildExportJson(): String {
         val rolls = dao.getAllNonArchivedRolls()
         val eventsByRoll = rolls.associate { roll ->
             roll.id to dao.getEventsForRoll(roll.id)
         }
         val printJobs = dao.getAllConfirmedPrintJobs()
-        return DataExportImport.toExportJson(rolls, eventsByRoll, printJobs)
+        val customMaterials = dao.getCustomMaterials().map { it.name }
+        return DataExportImport.toExportJson(rolls, eventsByRoll, printJobs, customMaterials)
     }
 
     suspend fun importFromJson(json: String): ImportResult {
@@ -477,6 +491,10 @@ class FilamentRepository(
                     )
                     printJobCount++
                 }
+            }
+
+            importData.customMaterials.forEach { name ->
+                dao.insertCustomMaterial(CustomMaterialEntity(name = name, createdAt = now))
             }
         }
 

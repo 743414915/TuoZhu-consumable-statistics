@@ -98,6 +98,10 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
     var shelfExpandedOverride by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var archivedExpandedOverride by rememberSaveable { mutableStateOf(false) }
     var currentPage by rememberSaveable { mutableStateOf(ConsumableRootPage.OVERVIEW) }
+    var customMaterialDialogVisible by rememberSaveable { mutableStateOf(false) }
+
+    val customMaterials by viewModel.observeCustomMaterials().collectAsStateWithLifecycle(emptyList())
+    val customMaterialNames = remember(customMaterials) { customMaterials.map { it.name } }
 
     val shelfRolls = if (state.activeRoll == null) state.rolls else state.rolls.filterNot { it.id == state.activeRoll?.id }
     val allowShelfCollapse = shelfRolls.size > 2
@@ -212,6 +216,7 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
                         onDeleteClick = { deleteRollId = it }, onSetActiveClick = viewModel::setActiveRoll,
                         onExport = viewModel::prepareExport,
                         onImport = { openDocumentLauncher.launch(arrayOf("application/json")) },
+                        onManageMaterials = { customMaterialDialogVisible = true },
                     )
                     ConsumableRootPage.SYNC -> SyncPage(
                         syncStatus = state.syncStatus, pendingJobs = state.pendingPrintJobs, activeRoll = state.activeRoll,
@@ -231,6 +236,16 @@ fun ConsumableWorkspaceApp(viewModel: ConsumableViewModel) {
         AddRollDialog(
             onDismiss = { addDialogVisible = false },
             onConfirm = { input -> viewModel.addRoll(input); addDialogVisible = false },
+            customMaterials = customMaterialNames,
+        )
+    }
+
+    if (customMaterialDialogVisible) {
+        CustomMaterialDialog(
+            materials = customMaterialNames,
+            onDismiss = { customMaterialDialogVisible = false },
+            onAdd = { viewModel.addCustomMaterial(it) },
+            onRemove = { viewModel.removeCustomMaterial(it) },
         )
     }
 

@@ -42,12 +42,14 @@ import androidx.compose.ui.unit.dp
 fun AddRollDialog(
     onDismiss: () -> Unit,
     onConfirm: (RollInput) -> Unit,
+    customMaterials: List<String> = emptyList(),
 ) {
-    val defaultMaterialIndex = defaultAddRollMaterialIndex()
-    val defaultMaterial = BambuMaterialOptions[defaultMaterialIndex]
+    val allMaterials = remember(customMaterials) { buildAllMaterialOptions(customMaterials) }
+    val defaultIdx = remember(customMaterials) { defaultAddRollMaterialIndex(customMaterials) }
+    val defaultMaterial = allMaterials[defaultIdx]
 
     var materialExpanded by rememberSaveable { mutableStateOf(false) }
-    var selectedMaterialIndex by rememberSaveable { mutableIntStateOf(defaultMaterialIndex) }
+    var selectedMaterialIndex by rememberSaveable { mutableIntStateOf(defaultIdx) }
     var brand by rememberSaveable { mutableStateOf("拓竹 Bambu Lab") }
     var name by rememberSaveable { mutableStateOf("") }
     var colorName by rememberSaveable { mutableStateOf("") }
@@ -63,7 +65,7 @@ fun AddRollDialog(
     var remainingManuallyEdited by rememberSaveable { mutableStateOf(false) }
     var thresholdManuallyEdited by rememberSaveable { mutableStateOf(false) }
 
-    val selectedMaterial = BambuMaterialOptions[selectedMaterialIndex]
+    val selectedMaterial = allMaterials[selectedMaterialIndex]
     val initialWeightValue = initialWeight.toIntOrNull()
     val currentWeightValue = currentWeight.toIntOrNull()
     val thresholdValue = lowStockThreshold.toIntOrNull()
@@ -146,13 +148,13 @@ fun AddRollDialog(
                         expanded = materialExpanded,
                         onDismissRequest = { materialExpanded = false },
                     ) {
-                        BambuMaterialOptions.forEachIndexed { index, option ->
+                        allMaterials.forEachIndexed { index, option ->
                             DropdownMenuItem(
                                 text = {
                                     Column {
                                         Text(option.label, style = MaterialTheme.typography.bodyLarge)
                                         Text(
-                                            text = "默认预警 ${option.defaultThresholdGrams}g",
+                                            text = if (option.isCustom) "自定义材料" else "默认预警 ${option.defaultThresholdGrams}g",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
